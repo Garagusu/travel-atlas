@@ -10,6 +10,17 @@ A private travel journal for the United States. Open it and the first thing you 
 - **Overview, wishlist, settings**: progress dashboard, wishlist grouped by state, JSON export and a full ZIP backup with original photos.
 - **Private by default**: password accounts with server-side sessions. Every query is scoped to the signed-in user, and photos are only ever served through an authenticated route.
 
+## Two editions
+
+| | Full app (repo root) | GitHub Pages edition (`site/`) |
+| --- | --- | --- |
+| Hosting | any Node.js host (Docker, Railway, Render, Vercel…) | GitHub Pages, free |
+| Data | PostgreSQL + photo storage on a server | this browser only (IndexedDB) |
+| Sign-in | password accounts | none needed; data never leaves the device |
+| Multiple devices | yes | via backup ZIP export/import |
+
+The Pages edition is published automatically by `.github/workflows/pages.yml`; see `site/README.md`.
+
 ## Stack
 
 | Concern | Choice |
