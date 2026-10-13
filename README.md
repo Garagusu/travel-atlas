@@ -1,0 +1,176 @@
+# Travel Atlas
+
+A private travel journal for the United States. Open it and the first thing you see is an interactive map of all 50 states, coloured by where you've been. Every city has its own page for photos, notes, ratings, tags and favourite places; trips tie cities together into routes; the journal keeps the stories.
+
+- **Map**: MapLibre GL with real US Census state boundaries and ~16,500 US cities and towns (GeoNames). Zoom, pan, search, click states and cities, filter by visited / want to visit / not visited, mark cities from the map and watch the states fill in.
+- **States and cities**: state pages with an outline map, your cities, progress through the largest cities, a photo gallery and notes. City pages with status, visit dates, rating, impression, tags, notes, a photo album, saved places on a locator map, the trips it belongs to and journal entries.
+- **Photos**: uploads are validated, auto-rotated, stripped of GPS metadata and stored with WebP thumbnail (≤640px) and display (≤2048px) variants plus the original. Grid view, full-size viewer with keyboard/swipe, captions/dates/descriptions (EXIF capture date is read automatically), covers, drag-to-reorder, bulk select, albums (a photo can be in several albums without being copied), paged library.
+- **Trips**: start/end dates, ordered itinerary with a route map, photos, notes, journal timeline. A city can be in many trips; the city record and its album are shared, never duplicated.
+- **Journal**: entries with title, date, city, trip, multi-paragraph story, highlights, places visited, tags and attached photos; full-text-ish search and tag filters.
+- **Overview, wishlist, settings**: progress dashboard, wishlist grouped by state, JSON export and a full ZIP backup with original photos.
+- **Private by default**: password accounts with server-side sessions. Every query is scoped to the signed-in user, and photos are only ever served through an authenticated route.
+
+## Stack
+
+| Concern | Choice |
+| --- | --- |
+| App | Next.js 16 (App Router, server actions), React 19, TypeScript |
+| Styling | Tailwind CSS 4, self-hosted Newsreader + Public Sans |
+| Database | PostgreSQL 14+ with Drizzle ORM and SQL migrations (`drizzle/`) |
+| Photos | `sharp` for processing; storage driver = local disk or any S3-compatible bucket (Supabase Storage, AWS S3, Cloudflare R2, MinIO…) |
+| Map | MapLibre GL JS; boundaries from `us-atlas` (US Census Bureau cartographic boundaries); cities from `all-the-cities` (GeoNames, CC BY 4.0) |
+| Auth | bcrypt password hashes, random session tokens (SHA-256 hashed in the DB), httpOnly SameSite cookies |
+| Tests | Vitest (unit + database integration), Playwright (end-to-end) |
+
+## Architecture
+
+```
+src/
+  app/
+    (auth)/login, signup         sign-in screens
+    (app)/                        everything behind auth (layout calls requireUser)
+      page.tsx                    the map (home)
+      dashboard, states/[code], cities, cities/[id], trips, trips/[id],
+      albums, albums/[id], journal, journal/new, journal/[id], journal/[id]/edit,
+      wishlist, settings
+    actions/                      server actions (validated with zod, owner-scoped)
+    api/
+      photos (GET page, POST upload), photos/[id]/[variant] (authenticated file serving)
+      map/cities (reference cities, cached), map/status (your statuses + stats)
+      search, export (JSON), export/archive (ZIP)
+  components/                     map, photo gallery/viewer/uploader, forms, cards
+  db/schema.ts                    Drizzle schema (source of truth for migrations)
+  lib/                            auth, data access, storage drivers, image processing, validation
+  proxy.ts                        redirects signed-out requests to /login (sessions are verified again in every page/action/route)
+scripts/                          migrate, seed geo data, build the state GeoJSON
+drizzle/                          generated SQL migrations
+tests/unit, tests/e2e             automated tests
+```
+
+### Database schema
+
+| Table | Purpose |
+| --- | --- |
+| `users`, `sessions` | accounts and server-side sessions (token hash, expiry) |
+| `states` | 50 states + DC (DC is shown but not counted in “x of 50”), FIPS code, bounding box |
+| `cities` | seeded GeoNames cities (`geoname_id`) plus towns a user adds (`created_by`) |
+| `city_logs` | one row per user+city: status (`not_visited` / `want_to_visit` / `visited`), dates, rating, impression, notes, tags, cover photo |
+| `state_logs` | per-user notes and cover photo for a state |
+| `places` | saved restaurants, sights, activities… inside a city, optional coordinates |
+| `trips`, `trip_stops` | trips and their ordered itinerary (stops reference the shared city row) |
+| `photos` | one row per uploaded photo: optional city and trip, storage key, dimensions, dominant colour, capture date, caption, description, gallery position |
+| `albums`, `album_photos` | albums and their ordered many-to-many photo membership |
+| `journal_entries`, `journal_photos` | entries and their ordered attached photos |
+
+All user tables cascade on user deletion. Deleting a photo clears any cover that pointed at it; deleting a trip, album or journal entry never deletes photos.
+
+## Run it locally
+
+Requirements: Node.js 20.9+ (22 recommended) and PostgreSQL 14+.
+
+```bash
+cp .env.example .env            # then edit DATABASE_URL
+npm install                     # also copies MapLibre's worker into public/
+createdb travel_journal         # or create it any other way
+npm run db:setup                # runs migrations + loads states and ~16.5k cities (idempotent)
+npm run dev                     # http://localhost:3000
+```
+
+The first person to open the app is sent to sign-up and becomes the owner. After that, sign-up is closed (set `ALLOW_SIGNUP=true` to allow more accounts; each account has its own private journal).
+
+For local development over plain http, cookies work as-is on `localhost`. If you serve a production build over http on another host, set `SECURE_COOKIES=false`.
+
+### Environment variables
+
+See `.env.example` for the full annotated list.
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | Postgres connection string |
+| `DATABASE_SSL` | no | `true` for hosted databases that require TLS (Supabase, Neon, RDS) |
+| `STORAGE_DRIVER` | no | `local` (default) or `s3` |
+| `STORAGE_DIR` | no | local driver folder, default `./storage/uploads`. Must be persistent in production. |
+| `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` | for `s3` | see below |
+| `MAX_UPLOAD_MB` | no | default 25 |
+| `ALLOW_SIGNUP` | no | default `false` once an owner exists |
+| `SECURE_COOKIES` | no | default `true` in production |
+| `NEXT_PUBLIC_MAP_STYLE_URL` | no | optional basemap, baked in at build time; see below |
+
+## Photo storage
+
+**Local disk** (default): files go to `STORAGE_DIR` as `<user>/<photo>/original.<ext>`, `display.webp`, `thumb.webp`. Use a persistent disk/volume in production (the Docker setup mounts one).
+
+**Supabase Storage** (or any S3-compatible service):
+
+1. In Supabase, open **Storage**, create a bucket (e.g. `photos`) and keep it **private**. Photos are always streamed through the app, which checks ownership.
+2. Go to **Storage → Settings → S3 Connection**, enable it, and create an access key.
+3. Set:
+   ```
+   STORAGE_DRIVER=s3
+   S3_BUCKET=photos
+   S3_ENDPOINT=https://<project-ref>.supabase.co/storage/v1/s3
+   S3_REGION=<the region shown on that page>
+   S3_ACCESS_KEY_ID=<access key id>
+   S3_SECRET_ACCESS_KEY=<secret>
+   S3_FORCE_PATH_STYLE=true
+   ```
+For AWS S3, leave `S3_ENDPOINT` empty and set `S3_FORCE_PATH_STYLE=false`. For Cloudflare R2 the endpoint is `https://<account-id>.r2.cloudflarestorage.com` and the region `auto`.
+
+If the S3 settings are incomplete, uploads fail with a message naming the missing variables, and the Settings page shows the storage as misconfigured.
+
+## The map and its data
+
+- State boundaries: US Census Bureau cartographic boundary files, via the [`us-atlas`](https://github.com/topojson/us-atlas) package (1:10m). `npm run geo:build` regenerates `public/geo/states.json` from it.
+- Cities: [GeoNames](https://www.geonames.org/) places with population ≥ 1,000 via [`all-the-cities`](https://github.com/zeke/all-the-cities) (neighbourhoods and abandoned places filtered out), loaded into the `cities` table by `npm run db:seed`. Smaller towns can be added from any state page by pinning them on a map.
+- Map colours always come from the database: states are filled when you have a visited (or wishlisted) city in them; city dots are coloured by your saved status.
+
+The default map style is self-contained: it draws the state shapes, city dots and labels with no tile server or API key. For streets and place names on top (useful on city pages for saved places), set a MapLibre style URL before building, for example:
+
+```
+NEXT_PUBLIC_MAP_STYLE_URL=https://tiles.openfreemap.org/styles/positron        # OpenFreeMap, no key
+NEXT_PUBLIC_MAP_STYLE_URL=https://api.maptiler.com/maps/dataviz-light/style.json?key=YOUR_KEY   # MapTiler
+```
+If the style can't be loaded, the map falls back to the built-in style.
+
+## Backups and export
+
+- **In the app**: Settings → *Download ZIP* (all data as `data.json` plus every original photo) or *Download JSON* (data only).
+- **Server level**: `pg_dump "$DATABASE_URL" > travel-journal.sql` for the database, plus a copy of `STORAGE_DIR` (or your bucket, e.g. `aws s3 sync`/`rclone`).
+- Restore: `psql "$DATABASE_URL" < travel-journal.sql` and put the photo files back at the same paths.
+
+## Tests
+
+```bash
+npm test                 # Vitest: validation, geo data, image processing, storage driver,
+                         # and database integration (stats, privacy scoping, search, trips, export).
+                         # Uses TEST_DATABASE_URL (default postgres://postgres:postgres@localhost:5432/travel_journal_test),
+                         # which is wiped and re-seeded on each run.
+npm run build && npm run test:e2e
+                         # Playwright against the production build on port 3100, using the test database:
+                         # sign-up/login, map search and marking, state and city pages, uploads and
+                         # validation errors, photo viewer and covers, places, albums, trips, journal,
+                         # dashboard, export/ZIP, cross-account privacy, persistence across sign-in.
+E2E_DEV=1 npm run test:e2e   # same tests against `next dev` (no build needed)
+```
+Install Playwright's browser once with `npx playwright install chromium`.
+
+## Deploy
+
+**Docker on any VPS (simplest, everything persistent)**
+
+```bash
+POSTGRES_PASSWORD=$(openssl rand -hex 16) docker compose up -d --build
+```
+This runs Postgres and the app with named volumes for the database and photos; migrations and the geo seed run automatically on start. Put a TLS-terminating proxy (Caddy, nginx, Traefik) in front and point your domain at it. If you serve plain http, set `SECURE_COOKIES=false`.
+
+**Render, Railway, Fly.io**: deploy the Dockerfile, attach a managed Postgres (`DATABASE_URL`, `DATABASE_SSL=true`), and either attach a persistent volume at `/app/storage/uploads` or use the `s3` driver.
+
+**Vercel + Supabase**: works for the app and database, but serverless functions have no persistent disk, so you must use `STORAGE_DRIVER=s3` (Supabase Storage). Vercel also caps request bodies at about 4.5 MB, so set `MAX_UPLOAD_MB=4` there or self-host if you upload full-resolution photos. Run `npm run db:setup` once from your machine against the production `DATABASE_URL` (use Supabase's session pooler URL).
+
+## Notes and limitations
+
+- HEIC photos straight from an iPhone can't be decoded by the bundled image library; the uploader says so and suggests switching the camera to “Most Compatible” or exporting as JPEG.
+- The S3 driver uses the standard AWS SDK commands and is covered by configuration tests, but it was not exercised against a live bucket while building this; the local driver is what the automated tests use. Try a test upload after configuring it.
+- The optional external basemap was not reachable from the build environment, so only the built-in map style has been visually verified.
+- Journal stories are plain multi-paragraph text (blank line = new paragraph) rather than a rich-text editor.
+- If `next dev` keeps reloading after you ran `next build`, delete the `.next` folder and start it again.

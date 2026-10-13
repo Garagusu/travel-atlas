@@ -1,0 +1,239 @@
+@import "tailwindcss";
+@import "@fontsource-variable/newsreader/opsz.css";
+@import "@fontsource-variable/newsreader/opsz-italic.css";
+@import "@fontsource-variable/public-sans/wght.css";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+@theme {
+  --font-display: "Newsreader Variable", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-paper: #faf8f4;
+  --color-card: #ffffff;
+  --color-ink: #1e2a30;
+  --color-ink-soft: #56636a;
+  --color-ink-faint: #8a9499;
+  --color-line: #e6e1d8;
+  --color-line-strong: #d6cfc2;
+  --color-fog: #eeeae2;
+  --color-pine: #2d6a5a;
+  --color-pine-deep: #1f4f42;
+  --color-pine-soft: #d6e8e0;
+  --color-marigold: #c98a1c;
+  --color-marigold-bright: #e2a33b;
+  --color-marigold-soft: #f8ead0;
+  --color-danger: #b3412f;
+  --color-danger-soft: #f7e1dc;
+
+  --radius-card: 14px;
+  --shadow-soft: 0 1px 2px rgb(30 42 48 / 0.04), 0 4px 16px rgb(30 42 48 / 0.06);
+  --shadow-lift: 0 2px 4px rgb(30 42 48 / 0.06), 0 12px 32px rgb(30 42 48 / 0.12);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-pine);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-pine-soft);
+  }
+}
+
+@layer components {
+  .card {
+    background: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-soft);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 2.35rem;
+    padding: 0 0.95rem;
+    border-radius: 999px;
+    font-size: 0.875rem;
+    font-weight: 550;
+    white-space: nowrap;
+    transition: background-color 120ms, border-color 120ms, color 120ms, box-shadow 120ms;
+    cursor: pointer;
+  }
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--color-ink);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: #2c3b43;
+  }
+  .btn-secondary {
+    background: var(--color-card);
+    color: var(--color-ink);
+    border: 1px solid var(--color-line-strong);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    border-color: var(--color-ink-faint);
+  }
+  .btn-ghost {
+    color: var(--color-ink-soft);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--color-fog);
+    color: var(--color-ink);
+  }
+  .btn-danger {
+    background: var(--color-card);
+    color: var(--color-danger);
+    border: 1px solid #e7c4bc;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--color-danger-soft);
+  }
+  .btn-sm {
+    height: 2rem;
+    padding: 0 0.75rem;
+    font-size: 0.8125rem;
+  }
+  .btn-icon {
+    width: 2.25rem;
+    padding: 0;
+  }
+  .input {
+    width: 100%;
+    background: var(--color-card);
+    border: 1px solid var(--color-line-strong);
+    border-radius: 10px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9375rem;
+    color: var(--color-ink);
+    transition: border-color 120ms, box-shadow 120ms;
+  }
+  .input::placeholder {
+    color: var(--color-ink-faint);
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-pine);
+    box-shadow: 0 0 0 3px rgb(45 106 90 / 0.15);
+  }
+  .input[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
+  .label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-ink-soft);
+    margin-bottom: 0.3rem;
+  }
+  .field-error {
+    font-size: 0.8125rem;
+    color: var(--color-danger);
+    margin-top: 0.25rem;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 1.75rem;
+    padding: 0 0.65rem;
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-card);
+    color: var(--color-ink-soft);
+    transition: background-color 120ms, border-color 120ms, color 120ms;
+  }
+  .chip[aria-pressed="true"],
+  .chip[data-active="true"] {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: #fff;
+  }
+  .chip.toggle[aria-pressed="true"] {
+    background: var(--color-card);
+    border-color: var(--color-ink);
+    color: var(--color-ink);
+  }
+  .chip.toggle[aria-pressed="false"] {
+    background: transparent;
+    color: var(--color-ink-faint);
+    text-decoration: line-through;
+  }
+  .prose-journal {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    line-height: 1.7;
+    max-width: 68ch;
+  }
+  .prose-journal p + p {
+    margin-top: 0.9em;
+  }
+}
+
+/* MapLibre popups tuned to the journal look */
+.maplibregl-popup-content {
+  border-radius: 12px !important;
+  padding: 12px 14px !important;
+  box-shadow: var(--shadow-lift) !important;
+  font-family: var(--font-sans);
+}
+.maplibregl-ctrl-group {
+  border-radius: 10px !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+/* HTML map labels */
+.tj-state-label {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 12.5px;
+  color: #8f8a80;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.tj-city-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff;
+}
+.tj-city-visited {
+  color: var(--color-pine-deep);
+}
+.tj-city-want {
+  color: #8a5d10;
+}
