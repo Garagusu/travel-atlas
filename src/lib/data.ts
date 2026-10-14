@@ -546,10 +546,15 @@ export async function getAlbum(userId: string, albumId: string) {
   return { ...album.album, tripName: album.tripName, photos: items, coverId: album.album.coverPhotoId ?? items[0]?.id ?? null };
 }
 
-export async function listPhotosPage(userId: string, opts: { before?: string; limit?: number } = {}) {
+/** Year a photo belongs to: the day it was taken, or the upload day (UTC) when the camera date is missing. */
+const photoYearSql = sql<number>`coalesce(extract(year from ${photos.takenOn}), extract(year from ${photos.createdAt} at time zone 'UTC'))::int`;
+
+export async function listPhotosPage(userId: string, opts: { before?: string; limit?: number; year?: number | null; cityId?: number | null } = {}) {
   const limit = Math.min(opts.limit ?? 60, 200);
   const where: SQL[] = [eq(photos.userId, userId)];
   if (opts.before) where.push(sql`${photos.createdAt} < ${new Date(opts.before)}`);
+  if (opts.year) where.push(sql`${photoYearSql} = ${opts.year}`);
+  if (opts.cityId) where.push(eq(photos.cityId, opts.cityId));
   const rows = await db
     .select({ ...photoColumns, cityName: cities.name, stateCode: cities.stateCode })
     .from(photos)
@@ -561,6 +566,17 @@ export async function listPhotosPage(userId: string, opts: { before?: string; li
   const items = rows.slice(0, limit);
   return { items, nextCursor: hasMore ? items[items.length - 1].createdAt.toISOString() : null };
 }
+
+/** Year and city choices for the photo library filter, with photo counts. */
+export async function photoFilterFacets(userId: string) {
+  return db
+    .select({ year: photoYearSql, cityId: photos.cityId, cityName: cities.name, stateCode: cities.stateCode, count: sql<number>`count(*)::int` })
+    .from(photos)
+    .leftJoin(cities, eq(cities.id, photos.cityId))
+    .where(eq(photos.userId, userId))
+    .groupBy(photoYearSql, photos.cityId, cities.name, cities.stateCode);
+}
+export type PhotoFacet = Awaited<ReturnType<typeof photoFilterFacets>>[number];
 
 export async function getPhoto(userId: string, photoId: string) {
   const [row] = await db

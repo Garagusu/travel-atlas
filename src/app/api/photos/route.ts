@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 const MAX_MB = Number(process.env.MAX_UPLOAD_MB ?? 25);
 const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Paginated photo library: GET /api/photos?before=<iso>&limit=60 */
+/** Paginated photo library: GET /api/photos?before=<iso>&limit=60&year=2023&cityId=12 */
 export async function GET(req: Request) {
   const user = await apiUser();
   if (user instanceof NextResponse) return user;
@@ -22,7 +22,11 @@ export async function GET(req: Request) {
   const before = url.searchParams.get("before") ?? undefined;
   if (before && Number.isNaN(Date.parse(before))) return jsonError(400, "Invalid cursor");
   const limit = Number(url.searchParams.get("limit") ?? 60) || 60;
-  const page = await listPhotosPage(user.id, { before, limit });
+  const year = url.searchParams.get("year") ? Number(url.searchParams.get("year")) : null;
+  const cityId = url.searchParams.get("cityId") ? Number(url.searchParams.get("cityId")) : null;
+  if (year !== null && (!Number.isInteger(year) || year < 1800 || year > 3000)) return jsonError(400, "Invalid year");
+  if (cityId !== null && (!Number.isInteger(cityId) || cityId <= 0)) return jsonError(400, "Invalid city");
+  const page = await listPhotosPage(user.id, { before, limit, year, cityId });
   return NextResponse.json(page);
 }
 

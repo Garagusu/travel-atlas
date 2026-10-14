@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/db";
 import { albumPhotos, albums, cities, cityLogs, journalEntries, journalPhotos, photos, places, tripStops, trips, users } from "@/db/schema";
-import { getMapStatuses, getStateDetail, getStats, getTrip, listAllPlaces, listMyCities, listPhotosPage, searchPlaces, wishlist } from "@/lib/data";
+import { getMapStatuses, getStateDetail, getStats, getTrip, listAllPlaces, listMyCities, listPhotosPage, photoFilterFacets, searchPlaces, wishlist } from "@/lib/data";
 import { buildExport } from "@/lib/export";
 
 let me: string;
@@ -139,6 +139,33 @@ describe("photo paging and export", () => {
     const second = await listPhotosPage(me, { limit: 3, before: first.nextCursor! });
     const overlap = second.items.filter((p) => first.items.some((f) => f.id === p.id));
     expect(overlap).toHaveLength(0);
+  });
+
+  it("filters the library by year and city, and counts the choices", async () => {
+    const add = (cityId: number | null, takenOn: string | null, createdAt: Date, userId = me) =>
+      db.insert(photos).values({ userId, cityId, takenOn, storageKey: `${userId}/f-${Math.random()}`, mimeType: "image/jpeg", sizeBytes: 1, width: 1, height: 1, createdAt });
+    await add(ids.Boston, "2023-06-14", new Date(Date.UTC(2025, 2, 1)));
+    await add(ids.Boston, "2023-06-15", new Date(Date.UTC(2025, 2, 2)));
+    await add(ids.Boston, "2024-10-05", new Date(Date.UTC(2025, 2, 3)));
+    await add(ids.Salem, "2023-07-01", new Date(Date.UTC(2025, 2, 4)));
+    await add(ids.Boston, null, new Date(Date.UTC(2022, 4, 1))); // no camera date → upload year
+    await add(ids.Boston, "2023-01-01", new Date(Date.UTC(2025, 2, 5)), other); // someone else's
+
+    const boston2023 = await listPhotosPage(me, { year: 2023, cityId: ids.Boston });
+    expect(boston2023.items.map((p) => p.takenOn).sort()).toEqual(["2023-06-14", "2023-06-15"]);
+    expect((await listPhotosPage(me, { year: 2023 })).items).toHaveLength(3);
+    expect((await listPhotosPage(me, { year: 2022, cityId: ids.Boston })).items).toHaveLength(1);
+    const paged = await listPhotosPage(me, { year: 2023, limit: 2 });
+    const rest = await listPhotosPage(me, { year: 2023, limit: 2, before: paged.nextCursor! });
+    expect([...paged.items, ...rest.items]).toHaveLength(3);
+
+    const facets = await photoFilterFacets(me);
+    const n = (year: number, cityId: number) => facets.find((f) => f.year === year && f.cityId === cityId)?.count ?? 0;
+    expect(n(2023, ids.Boston)).toBe(2);
+    expect(n(2023, ids.Salem)).toBe(1);
+    expect(n(2022, ids.Boston)).toBe(1);
+    expect(facets.find((f) => f.cityId === ids.Boston)?.cityName).toBe("Boston");
+    expect(facets.reduce((s, f) => s + f.count, 0)).toBe((await listPhotosPage(me, { limit: 200 })).items.length);
   });
 
   it("exports every kind of record for the owner only", async () => {

@@ -228,6 +228,40 @@ test("photos with a location are filed under the nearest city", async () => {
   await expect(page.getByText("1 photo")).toBeVisible();
 });
 
+test("the photo library filters by year and city together", async () => {
+  // give one Boston photo a 2023 date; the others keep this year's date
+  await go("/cities/4930956");
+  await page.getByRole("button", { name: "Open photo" }).first().click();
+  const viewer = page.getByRole("dialog");
+  await viewer.getByRole("button", { name: "Edit details" }).click();
+  await viewer.getByLabel("Date taken").fill("2023-06-14");
+  await viewer.getByRole("button", { name: "Save details" }).click();
+  await page.keyboard.press("Escape");
+
+  await go("/albums");
+  const year = page.getByLabel("Year", { exact: true });
+  const city = page.getByLabel("City", { exact: true });
+  const tiles = page.locator("#all-h + p + div ul > li");
+  await expect(tiles).toHaveCount(3);
+
+  await year.selectOption("2023");
+  await expect(tiles).toHaveCount(1);
+  await expect(page.getByText("1 photo in 2023")).toBeVisible();
+  // only cities with 2023 photos are offered
+  await expect(city.locator("option")).toHaveText(["All cities", "Boston, MA (1)"]);
+
+  await city.selectOption({ label: "Boston, MA (1)" });
+  await expect(page.getByText("1 photo from Boston in 2023")).toBeVisible();
+  await expect(tiles).toHaveCount(1);
+
+  await year.selectOption("");
+  await expect(page.getByText("2 photos from Boston")).toBeVisible();
+  await expect(tiles).toHaveCount(2);
+
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(tiles).toHaveCount(3);
+});
+
 test("the site can be added to the home screen", async () => {
   const m = await (await page.request.get("manifest.webmanifest")).json();
   expect(m.display).toBe("standalone");
