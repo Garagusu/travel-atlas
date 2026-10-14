@@ -3,14 +3,22 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Container, PageHeader } from "@/components/ui/page-header";
 import { requireUser } from "@/lib/auth";
 import { photoUrl } from "@/lib/constants";
-import { getStats, listAlbums, listPhotosPage, listTripOptions, photoFilterFacets } from "@/lib/data";
+import { LocateOlderPhotos } from "@/components/photos/locate-older-photos";
+import { countPhotosToLocate, getStats, listAlbums, listPhotosPage, listTripOptions, photoFilterFacets } from "@/lib/data";
 import { AlbumFormButton, Library } from "./albums-client";
 
 export const metadata = { title: "Photo Albums" };
 
 export default async function AlbumsPage() {
   const user = await requireUser();
-  const [albums, firstPage, trips, stats, facets] = await Promise.all([listAlbums(user.id), listPhotosPage(user.id, { limit: 48 }), listTripOptions(user.id), getStats(user.id), photoFilterFacets(user.id)]);
+  const [albums, firstPage, trips, stats, facets, toLocate] = await Promise.all([
+    listAlbums(user.id),
+    listPhotosPage(user.id, { limit: 48 }),
+    listTripOptions(user.id),
+    getStats(user.id),
+    photoFilterFacets(user.id),
+    countPhotosToLocate(user.id),
+  ]);
   const tripOptions = trips.map((t) => ({ id: t.id, title: t.name }));
   return (
     <Container>
@@ -49,6 +57,8 @@ export default async function AlbumsPage() {
       )}
 
       <section className="mt-16" aria-labelledby="all-h">
+        {/* stays mounted after it finishes so its result survives the refresh */}
+        <LocateOlderPhotos count={toLocate} />
         <h2 id="all-h" className="text-3xl mb-1">All photos</h2>
         <p className="text-sm text-ink-soft mb-5">Newest first. Upload here for photos that don&apos;t belong to a particular city, or select photos to file them into albums.</p>
         <Library facets={facets} initial={firstPage.items} initialCursor={firstPage.nextCursor} albums={albums.map((a) => ({ id: a.id, title: a.title }))} trips={tripOptions} />

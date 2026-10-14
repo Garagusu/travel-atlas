@@ -123,6 +123,14 @@ export const photoMetaSchema = z.object({
   takenOn: optionalDate,
 });
 
+/** A photo's location; null removes it. */
+export const photoLocationSchema = z
+  .object({
+    lat: z.number().finite().min(-90).max(90),
+    lon: z.number().finite().min(-180).max(180),
+  })
+  .nullable();
+
 export const stateNotesSchema = z.object({ notes: optionalText(20_000) });
 
 export const customCitySchema = z.object({

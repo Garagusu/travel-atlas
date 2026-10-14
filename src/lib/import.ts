@@ -275,6 +275,9 @@ export async function importBackup(userId: string, zipPath: string, onProgress?:
           height: img.height,
           dominantColor: img.dominantColor,
           takenOn: date(p.takenOn) ?? img.takenOn,
+          // a location saved in the backup (perhaps set by hand) wins over the camera's
+          lat: num(p.lat) !== null && num(p.lon) !== null ? num(p.lat) : (img.gps?.lat ?? null),
+          lon: num(p.lat) !== null && num(p.lon) !== null ? num(p.lon) : (img.gps?.lon ?? null),
           caption: str(p.caption),
           description: str(p.description),
           position: num(p.position) ?? 0,

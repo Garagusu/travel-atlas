@@ -1,6 +1,7 @@
 "use server";
 
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import exifr from "exifr";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
@@ -8,7 +9,9 @@ import { albumPhotos, albums, cities, cityLogs, photos, stateLogs, trips } from 
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireUser } from "@/lib/auth";
 import { storage } from "@/lib/storage";
-import { albumSchema, photoMetaSchema } from "@/lib/validation";
+import { countPhotosToLocate, nearestCity } from "@/lib/data";
+import { extForMime, variantKey } from "@/lib/images";
+import { albumSchema, photoLocationSchema, photoMetaSchema } from "@/lib/validation";
 import { invalid, refreshAll, uuidSchema } from "./helpers";
 
 const idList = z.array(z.string().uuid()).min(1, "Choose at least one photo").max(2000);
@@ -26,6 +29,74 @@ export async function updatePhoto(photoId: string, input: unknown): Promise<Acti
   if (!res.length) return fail("Photo not found");
   refreshAll();
   return ok();
+}
+
+/**
+ * Set where a photo was taken, or pass null to remove it. A photo that isn't
+ * filed under a city yet goes to the nearest one.
+ */
+export async function setPhotoLocation(photoId: string, input: unknown): Promise<ActionResult<{ cityId: number | null; cityName: string | null; stateCode: string | null }>> {
+  const user = await requireUser();
+  if (!uuidSchema.safeParse(photoId).success) return fail("Invalid photo");
+  const parsed = photoLocationSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const loc = parsed.data;
+  const [photo] = await db
+    .select({ cityId: photos.cityId })
+    .from(photos)
+    .where(and(eq(photos.id, photoId), eq(photos.userId, user.id)))
+    .limit(1);
+  if (!photo) return fail("Photo not found");
+  let city: { id: number; name: string; stateCode: string } | null = null;
+  if (loc && !photo.cityId) city = await nearestCity(user.id, loc.lat, loc.lon).catch(() => null);
+  await db
+    .update(photos)
+    .set({
+      lat: loc ? Math.round(loc.lat * 1e6) / 1e6 : null,
+      lon: loc ? Math.round(loc.lon * 1e6) / 1e6 : null,
+      gpsChecked: true,
+      ...(city ? { cityId: city.id } : {}),
+    })
+    .where(and(eq(photos.id, photoId), eq(photos.userId, user.id)));
+  refreshAll();
+  return ok({ cityId: city?.id ?? photo.cityId, cityName: city?.name ?? null, stateCode: city?.stateCode ?? null });
+}
+
+/**
+ * Photos uploaded before locations were saved: read a batch of originals for
+ * their GPS position. Call repeatedly until `remaining` is 0.
+ */
+export async function locateOlderPhotos(): Promise<ActionResult<{ checked: number; found: number; remaining: number }>> {
+  const user = await requireUser();
+  const batch = await db
+    .select({ id: photos.id, storageKey: photos.storageKey, mimeType: photos.mimeType, cityId: photos.cityId })
+    .from(photos)
+    .where(and(eq(photos.userId, user.id), eq(photos.gpsChecked, false)))
+    .limit(15);
+  const store = storage();
+  let found = 0;
+  for (const p of batch) {
+    let gps: { lat: number; lon: number } | null = null;
+    try {
+      const obj = await store.get(variantKey(p.storageKey, "original", extForMime(p.mimeType)));
+      if (obj) {
+        const buf = Buffer.from(await new Response(obj.body).arrayBuffer());
+        const g = await exifr.gps(buf).catch(() => null);
+        if (g && Number.isFinite(g.latitude) && Number.isFinite(g.longitude) && !(g.latitude === 0 && g.longitude === 0)) gps = { lat: g.latitude, lon: g.longitude };
+      }
+    } catch (err) {
+      console.error(`couldn't read the original of photo ${p.id}`, err);
+    }
+    let cityId = p.cityId;
+    if (gps && !cityId) cityId = (await nearestCity(user.id, gps.lat, gps.lon).catch(() => null))?.id ?? null;
+    await db
+      .update(photos)
+      .set({ gpsChecked: true, ...(gps ? { lat: gps.lat, lon: gps.lon, cityId } : {}) })
+      .where(and(eq(photos.id, p.id), eq(photos.userId, user.id)));
+    if (gps) found++;
+  }
+  if (batch.length) refreshAll();
+  return ok({ checked: batch.length, found, remaining: await countPhotosToLocate(user.id) });
 }
 
 /** Move photos to a different city and/or trip. Pass null to unlink. */

@@ -13,7 +13,7 @@ export type MiniMarker = {
   lon: number;
   lat: number;
   label: string;
-  kind: "city" | "place" | "stop";
+  kind: "city" | "place" | "stop" | "photo";
   status?: 0 | 1 | 2;
   n?: number;
 };
@@ -163,6 +163,9 @@ export function MiniMap({
       } else if (m.kind === "place") {
         dot.className = "h-3 w-3 rounded-full ring-2 ring-white shadow";
         dot.style.background = MAP_COLORS.marigold;
+      } else if (m.kind === "photo") {
+        dot.className = "h-3 w-3 rounded-full ring-2 ring-white shadow";
+        dot.style.background = MAP_COLORS.photo;
       } else {
         dot.className = "h-4 w-4 rounded-full ring-[3px] ring-white shadow";
         dot.style.background = m.status === 2 ? MAP_COLORS.pine : m.status === 1 ? MAP_COLORS.marigold : MAP_COLORS.ink;
@@ -171,7 +174,8 @@ export function MiniMap({
       label.className = "tj-city-label text-ink";
       label.style.fontSize = m.kind === "place" ? "11px" : "12.5px";
       label.textContent = m.label;
-      node.append(dot, label);
+      node.append(dot);
+      if (m.label) node.append(label);
       return new maplibregl.Marker({ element: node, anchor: "left", offset: [-8, 0] }).setLngLat([m.lon, m.lat]).addTo(map);
     });
 

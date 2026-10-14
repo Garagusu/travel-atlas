@@ -10,11 +10,13 @@ import { setCityStatus } from "@/app/actions/cities";
 import { SearchBox } from "@/components/search-box";
 import { StatusControl, type Status } from "@/components/status-control";
 import { TileGrid } from "@/components/tile-grid";
+import { Lightbox } from "@/components/photos/lightbox";
 import { useToast } from "@/components/ui/toast";
+import type { PhotoItem } from "@/lib/data";
 import { REGION_VIEWS, STATE_BY_CODE, stateName } from "@/lib/geo/states-meta";
 import { PlaceCard } from "./place-card";
 import { USMap, type USMapHandle } from "./us-map";
-import { CODE_FROM_STATUS, STATUS_FROM_CODE, type CityPick, type MapPlace, type MapStats, type StatusCode, type StatusFilter } from "./types";
+import { CODE_FROM_STATUS, STATUS_FROM_CODE, type CityPick, type MapPhoto, type MapPlace, type MapStats, type StatusCode, type StatusFilter } from "./types";
 import { useAtlasData } from "./use-atlas-data";
 
 const FILTERS: { key: keyof StatusFilter; label: string; swatch: string }[] = [
@@ -22,6 +24,7 @@ const FILTERS: { key: keyof StatusFilter; label: string; swatch: string }[] = [
   { key: "want", label: "Want to visit", swatch: "bg-marigold-bright" },
   { key: "none", label: "Not visited", swatch: "bg-[#9aa3a6]" },
   { key: "places", label: "Saved places", swatch: "bg-[#c2410c]" },
+  { key: "photos", label: "Photos", swatch: "bg-[#b4536a]" },
 ];
 
 export function MapExplorer({ userName }: { userName: string }) {
@@ -30,7 +33,20 @@ export function MapExplorer({ userName }: { userName: string }) {
   const router = useRouter();
   const params = useSearchParams();
   const toast = useToast();
-  const [filter, setFilter] = useState<StatusFilter>({ visited: true, want: true, none: true, places: true });
+  const [filter, setFilter] = useState<StatusFilter>({ visited: true, want: true, none: true, places: true, photos: true });
+  /* photos with a location: dots on the map that open the viewer */
+  const [photos, setPhotos] = useState<(PhotoItem & MapPhoto)[]>([]);
+  const [openPhoto, setOpenPhoto] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/map/photos", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: (PhotoItem & MapPhoto)[]) => live && setPhotos(list))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
   const [selectedState, setSelectedState] = useState<string | null>(null);
   const [city, setCity] = useState<CityPick | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -201,6 +217,11 @@ export function MapExplorer({ userName }: { userName: string }) {
             onStateClick={selectState}
             places={data.places}
             onPlaceClick={openPlace}
+            photos={photos}
+            onPhotoClick={(id) => {
+              const i = photos.findIndex((p) => p.id === id);
+              if (i >= 0) setOpenPhoto(i);
+            }}
             onReady={() => setMapReady(true)}
           />
         )}
@@ -273,6 +294,22 @@ export function MapExplorer({ userName }: { userName: string }) {
           popupNode,
         )}
       {placeNode && place && createPortal(<PlaceCard place={place} onClose={() => placePopupRef.current?.remove()} />, placeNode)}
+      {openPhoto !== null && photos[openPhoto] && (
+        <Lightbox
+          photos={photos}
+          index={openPhoto}
+          onIndex={setOpenPhoto}
+          onClose={() => {
+            // land on the last photo you looked at
+            const p = photos[openPhoto];
+            if (p) mapRef.current?.flyToCity({ lat: p.lat, lon: p.lon }, Math.max(mapRef.current?.map()?.getZoom() ?? 0, 11));
+            setOpenPhoto(null);
+          }}
+          onChanged={(np) =>
+            setPhotos((list) => list.map((x) => (x.id === np.id ? ({ ...x, ...np } as PhotoItem & MapPhoto) : x)).filter((x) => x.lat !== null && x.lon !== null))
+          }
+        />
+      )}
     </div>
   );
 }

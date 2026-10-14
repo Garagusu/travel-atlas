@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/db";
 import { albumPhotos, albums, cities, cityLogs, journalEntries, journalPhotos, photos, places, tripStops, trips, users } from "@/db/schema";
-import { getMapStatuses, getStateDetail, getStats, getTrip, listAllPlaces, listMyCities, listPhotosPage, photoFilterFacets, searchPlaces, wishlist } from "@/lib/data";
+import { getMapStatuses, getStateDetail, getStats, getTrip, listAllPlaces, listMyCities, countPhotosToLocate, listMapPhotos, listPhotosPage, photoFilterFacets, searchPlaces, wishlist } from "@/lib/data";
 import { buildExport } from "@/lib/export";
 
 let me: string;
@@ -166,6 +166,22 @@ describe("photo paging and export", () => {
     expect(n(2022, ids.Boston)).toBe(1);
     expect(facets.find((f) => f.cityId === ids.Boston)?.cityName).toBe("Boston");
     expect(facets.reduce((s, f) => s + f.count, 0)).toBe((await listPhotosPage(me, { limit: 200 })).items.length);
+  });
+
+  it("lists located photos for the map and counts older photos still to check", async () => {
+    const add = (v: { lat?: number | null; lon?: number | null; gpsChecked?: boolean }, userId = me) =>
+      db.insert(photos).values({ userId, cityId: ids.Boston, storageKey: `${userId}/loc-${Math.random()}`, mimeType: "image/jpeg", sizeBytes: 1, width: 1, height: 1, ...v });
+    const before = (await listMapPhotos(me)).length;
+    const toCheck = await countPhotosToLocate(me);
+    await add({ lat: 42.3601, lon: -71.0589 });
+    await add({ lat: null, lon: null });
+    await add({ gpsChecked: false });
+    await add({ lat: 21.3, lon: -157.8 }, other);
+    const map = await listMapPhotos(me);
+    expect(map).toHaveLength(before + 1);
+    expect(map.every((p) => p.lat !== null && p.lon !== null)).toBe(true);
+    expect(map.find((p) => p.lat === 42.3601)?.cityName).toBe("Boston");
+    expect(await countPhotosToLocate(me)).toBe(toCheck + 1);
   });
 
   it("exports every kind of record for the owner only", async () => {

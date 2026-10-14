@@ -61,6 +61,37 @@ function shortAddress(a: Record<string, string> | undefined, fallback: string) {
 }
 
 /**
+ * A short name for where a photo was taken, e.g. "Beacon Hill, Boston" or
+ * "Zion National Park, Utah". Uses OpenStreetMap's reverse lookup; results are
+ * cached per ~100 m so flipping through photos from one spot asks only once.
+ */
+const reverseCache = new Map<string, Promise<string | null>>();
+export function reverseGeocode(lat: number, lon: number, signal?: AbortSignal): Promise<string | null> {
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  const hit = reverseCache.get(key);
+  if (hit) return hit;
+  const params = new URLSearchParams({ lat: lat.toFixed(5), lon: lon.toFixed(5), format: "jsonv2", zoom: "16", addressdetails: "1", "accept-language": "en" });
+  const p = fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, { signal, headers: { Accept: "application/json" } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((r: { name?: string; address?: Record<string, string> } | null) => {
+      const a = r?.address;
+      if (!a) return null;
+      const area = a.neighbourhood || a.suburb || a.quarter || a.hamlet;
+      const town = a.city || a.town || a.village || a.county;
+      const park = a.national_park || a.nature_reserve || a.park || (a.tourism ? r?.name : undefined);
+      const parts = [park || area, town || a.state].filter((x, i, all): x is string => !!x && all.indexOf(x) === i);
+      return parts.length ? parts.join(", ") : null;
+    })
+    .catch((err) => {
+      reverseCache.delete(key);
+      if ((err as Error).name === "AbortError") throw err;
+      return null;
+    });
+  reverseCache.set(key, p);
+  return p;
+}
+
+/**
  * Search OpenStreetMap for a named place, preferring results near the city.
  * Follows Nominatim's usage policy: one request per search, results cached.
  */

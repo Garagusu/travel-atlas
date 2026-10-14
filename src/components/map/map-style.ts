@@ -9,6 +9,8 @@ export const MAP_COLORS = {
   wantFill: "#f8e8c9",
   pine: "#2d6a5a",
   marigold: "#e2a33b",
+  /** where photos were taken */
+  photo: "#b4536a",
   neutralDot: "#9aa3a6",
   ink: "#1e2a30",
 };

@@ -144,6 +144,8 @@ export async function POST(req: Request) {
           height: processed.height,
           dominantColor: processed.dominantColor,
           takenOn: processed.takenOn,
+          lat: processed.gps?.lat ?? null,
+          lon: processed.gps?.lon ?? null,
           caption,
           position: next,
         })
@@ -176,6 +178,8 @@ export async function POST(req: Request) {
           caption: row.caption,
           description: row.description,
           takenOn: row.takenOn,
+          lat: row.lat,
+          lon: row.lon,
           cityId: row.cityId,
           tripId: row.tripId,
           createdAt: row.createdAt,

@@ -229,6 +229,11 @@ export const photos = pgTable(
     /** average colour, used as a placeholder while thumbnails load */
     dominantColor: text("dominant_color"),
     takenOn: date("taken_on"),
+    /** where the photo was taken, from the camera's GPS or set by hand */
+    lat: doublePrecision("lat"),
+    lon: doublePrecision("lon"),
+    /** false only for photos uploaded before locations were saved; cleared once their original has been read */
+    gpsChecked: boolean("gps_checked").notNull().default(true),
     caption: text("caption"),
     description: text("description"),
     /** order within the city gallery */

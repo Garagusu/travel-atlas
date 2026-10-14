@@ -16,7 +16,9 @@ test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ permissions: ["clipboard-read", "clipboard-write"] });
   // OpenStreetMap place search, answered locally so tests don't depend on the network
   await page.route("https://nominatim.openstreetmap.org/**", (route) =>
-    route.fulfill({
+    route.request().url().includes("/reverse")
+      ? route.fulfill({ json: { name: "", address: { neighbourhood: "Mission District", city: "San Francisco", state: "California" } } })
+      : route.fulfill({
       json: [
         {
           lat: "42.3634156",
@@ -468,6 +470,44 @@ test("photos with a location are filed under the nearest city", async () => {
   );
   await db.end();
   expect(rows).toEqual([{ name: "San Francisco" }]);
+});
+
+test("a photo's location shows in the viewer, can be changed, and older photos get theirs", async () => {
+  await page.goto("/albums");
+  await page.getByRole("button", { name: "Open photo" }).first().click();
+  const viewer = page.getByRole("dialog");
+  await expect(viewer.getByText("Mission District, San Francisco")).toBeVisible();
+  await expect(viewer.getByRole("link", { name: "Open in Maps" })).toHaveAttribute("href", /query=37\.\d+,-122\.\d+/);
+
+  await viewer.getByRole("button", { name: "Remove", exact: true }).click();
+  await viewer.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(viewer.getByText("No location saved for this photo")).toBeVisible();
+
+  // put it back by clicking the map, which opens on the photo's city
+  await viewer.getByRole("button", { name: "Add location" }).click();
+  await expect(viewer.getByText("Click where you took this photo")).toBeVisible();
+  await viewer.locator("canvas.maplibregl-canvas").click();
+  await viewer.getByRole("button", { name: "Save location" }).click();
+  await expect(page.getByText("Location saved")).toBeVisible();
+  await expect(viewer.getByText(/37\.\d+° N, 122\.\d+° W/)).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // a photo uploaded before locations were saved gets its spot from the original file
+  const db = new Client({ connectionString: DB });
+  await db.connect();
+  await db.query("update photos set lat = null, lon = null, gps_checked = false where original_name = 'with-gps.jpg'");
+  await page.goto("/albums");
+  await page.getByRole("button", { name: "Find their locations" }).click();
+  await expect(page.getByText(/Done: 1 of 1 older photo had a location/)).toBeVisible({ timeout: 20_000 });
+  const { rows } = await db.query("select round(lat::numeric, 2)::text as lat, round(lon::numeric, 2)::text as lon from photos where original_name = 'with-gps.jpg'");
+  await db.end();
+  expect(rows).toEqual([{ lat: "37.81", lon: "-122.42" }]);
+
+  // and the big map lists it on the photo layer
+  const onMap = await (await page.request.get("/api/map/photos")).json();
+  expect(onMap).toHaveLength(1);
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Photos" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("restoring a backup brings the journal back as it was", async () => {

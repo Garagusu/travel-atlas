@@ -127,6 +127,7 @@ export default async function CityPage({ params }: PageProps<"/cities/[id]">) {
               city={{ id: city.id, name: city.name, lat: city.lat, lon: city.lon, stateCode: city.stateCode, status }}
               places={places}
               nearby={nearby}
+              photoSpots={photos.flatMap((p) => (p.lat !== null && p.lon !== null ? [{ id: p.id, lat: p.lat, lon: p.lon }] : []))}
             />
             <section aria-labelledby="trips-h">
               <h2 id="trips-h" className="text-2xl mb-3">Trips</h2>

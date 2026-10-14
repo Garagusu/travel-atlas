@@ -35,6 +35,8 @@ export const photoColumns = {
   caption: photos.caption,
   description: photos.description,
   takenOn: photos.takenOn,
+  lat: photos.lat,
+  lon: photos.lon,
   cityId: photos.cityId,
   tripId: photos.tripId,
   createdAt: photos.createdAt,
@@ -47,6 +49,8 @@ export type PhotoItem = {
   caption: string | null;
   description: string | null;
   takenOn: string | null;
+  lat: number | null;
+  lon: number | null;
   cityId: number | null;
   tripId: string | null;
   createdAt: Date;
@@ -577,6 +581,26 @@ export async function photoFilterFacets(userId: string) {
     .groupBy(photoYearSql, photos.cityId, cities.name, cities.stateCode);
 }
 export type PhotoFacet = Awaited<ReturnType<typeof photoFilterFacets>>[number];
+
+/** Every photo with a location, for the photo layer on the big map (newest first). */
+export async function listMapPhotos(userId: string) {
+  return db
+    .select({ ...photoColumns, cityName: cities.name, stateCode: cities.stateCode })
+    .from(photos)
+    .leftJoin(cities, eq(cities.id, photos.cityId))
+    .where(and(eq(photos.userId, userId), sql`${photos.lat} is not null`, sql`${photos.lon} is not null`))
+    .orderBy(desc(sql`coalesce(${photos.takenOn}::timestamptz, ${photos.createdAt})`))
+    .limit(5000);
+}
+
+/** Older photos whose original hasn't been read for a GPS location yet. */
+export async function countPhotosToLocate(userId: string) {
+  const [r] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(photos)
+    .where(and(eq(photos.userId, userId), eq(photos.gpsChecked, false)));
+  return r?.n ?? 0;
+}
 
 export async function getPhoto(userId: string, photoId: string) {
   const [row] = await db

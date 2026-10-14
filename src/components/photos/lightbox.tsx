@@ -8,6 +8,7 @@ import { formatDate } from "@/components/ui/format";
 import { useToast } from "@/components/ui/toast";
 import { photoUrl } from "@/lib/constants";
 import type { PhotoItem } from "@/lib/data";
+import { PhotoLocation } from "./photo-location";
 
 /** Full-size viewer with captions, keyboard and swipe navigation, and inline editing. */
 export function Lightbox({
@@ -25,7 +26,13 @@ export function Lightbox({
   onChanged?: (p: PhotoItem) => void;
   extraActions?: (p: PhotoItem) => React.ReactNode;
 }) {
-  const p = photos[index];
+  // edits made in the viewer show at once, even where the parent doesn't pass them back
+  const [patched, setPatched] = useState<Record<string, PhotoItem>>({});
+  const p = photos[index] ? (patched[photos[index].id] ?? photos[index]) : undefined;
+  const changed = (np: PhotoItem) => {
+    setPatched((m) => ({ ...m, [np.id]: np }));
+    onChanged?.(np);
+  };
   const [editing, setEditing] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const touchX = useRef<number | null>(null);
@@ -123,7 +130,7 @@ export function Lightbox({
           </button>
         </div>
         {editing ? (
-          <PhotoEditForm photo={p} onDone={(np) => { setEditing(false); if (np) onChanged?.(np); }} />
+          <PhotoEditForm photo={p} onDone={(np) => { setEditing(false); if (np) changed(np); }} />
         ) : (
           <>
             <p className="font-display text-2xl leading-snug">{p.caption ?? <span className="text-ink-faint">No caption</span>}</p>
@@ -145,6 +152,7 @@ export function Lightbox({
               )}
             </div>
             {extraActions && <div className="mt-2 flex flex-wrap gap-2">{extraActions(p)}</div>}
+            <PhotoLocation photo={p} onChanged={changed} />
           </>
         )}
       </aside>
