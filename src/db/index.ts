@@ -8,7 +8,14 @@ declare global {
 
 function createPool() {
   const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL is not set. Copy .env.example to .env and fill it in.");
+  if (!url) {
+    // Don't fail on import: `next build` loads route modules without a database.
+    // Any real query still fails with a clear message.
+    const missing = new Pool();
+    const fail = () => Promise.reject(new Error("DATABASE_URL is not set. Copy .env.example to .env and fill it in."));
+    Object.assign(missing, { connect: fail, query: fail });
+    return missing;
+  }
   return new Pool({
     connectionString: url,
     max: Number(process.env.DATABASE_POOL_MAX ?? 10),
