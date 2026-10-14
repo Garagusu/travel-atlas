@@ -4,7 +4,22 @@ test.describe.configure({ mode: "serial" });
 
 let page: Page;
 test.beforeAll(async ({ browser }) => {
-  page = await browser.newPage();
+  page = await browser.newPage({ permissions: ["clipboard-read", "clipboard-write"] });
+  await page.route("https://nominatim.openstreetmap.org/**", (route) =>
+    route.fulfill({
+      json: [
+        {
+          lat: "42.3634156",
+          lon: "-71.0559294",
+          name: "Neptune Oyster",
+          display_name: "Neptune Oyster, 63, Salem Street, Boston, Massachusetts, United States",
+          category: "amenity",
+          type: "restaurant",
+          address: { house_number: "63", road: "Salem Street", city: "Boston", state: "Massachusetts" },
+        },
+      ],
+    }),
+  );
 });
 
 const go = (hash: string) => page.goto(`./#${hash}`);
@@ -82,9 +97,23 @@ test("city page: notes, validation, photos, viewer and cover", async () => {
 
 test("places, albums, trips and journal", async () => {
   await page.getByRole("button", { name: "Add a place" }).click();
-  await page.getByLabel("Name", { exact: true }).fill("Neptune Oyster");
+  await page.getByLabel("Find the place").fill("Neptune Oyster");
+  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("list", { name: "Search results" }).getByRole("button", { name: /Neptune Oyster/ }).click();
+  await expect(page.getByLabel("Address")).toHaveValue("63 Salem Street, Boston, Massachusetts");
+  await page.getByLabel("Notes", { exact: true }).fill("Hot lobster roll.");
   await page.getByRole("button", { name: "Save place" }).click();
   await expect(page.getByText("Neptune Oyster saved")).toBeVisible();
+
+  await page.getByRole("button", { name: "Add a place" }).click();
+  await page.getByLabel("Google Maps link (optional)").fill("https://www.google.com/maps/place/Museum+of+Fine+Arts/@42.33,-71.09,17z/data=!3d42.3393849!4d-71.0940447");
+  await page.getByLabel("Kind").selectOption("museum");
+  await page.getByRole("button", { name: "Save place" }).click();
+  await expect(page.getByText("Museum of Fine Arts saved")).toBeVisible();
+
+  await page.getByRole("button", { name: "Share my picks in Boston" }).click();
+  await expect(page.getByText("Copied — paste it into a message")).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("• Museum of Fine Arts (Museum)");
 
   await page.getByRole("button", { name: "Select", exact: true }).click();
   await page.getByRole("button", { name: "Select all" }).click();
@@ -107,6 +136,7 @@ test("places, albums, trips and journal", async () => {
     await expect(page.getByText(new RegExp(`${q} added to the route`))).toBeVisible();
   }
   await page.getByRole("button", { name: "Move Portland earlier" }).click();
+  await expect(page.getByText("Route updated")).toBeVisible();
   await expect(page.locator("ol > li").first()).toContainText("Portland");
 
   await go("/journal/new");
@@ -126,6 +156,15 @@ test("places, albums, trips and journal", async () => {
   await page.getByLabel("Search journal").fill("north end");
   await page.getByRole("button", { name: "Search" }).click();
   await expect(page.getByRole("link", { name: /Harbor walk/ })).toBeVisible();
+});
+
+test("places page and map pins", async () => {
+  await go("/places");
+  await expect(page.getByText("Hot lobster roll.")).toBeVisible();
+  await page.getByRole("button", { name: /Museum/ }).first().click();
+  await expect(page.getByText("Neptune Oyster")).toHaveCount(0);
+  await page.getByRole("link", { name: "On my map" }).first().click();
+  await expect(page.locator(".maplibregl-popup").getByText("Museum of Fine Arts")).toBeVisible();
 });
 
 test("dashboard reflects saved records", async () => {

@@ -16,6 +16,7 @@ import { EditEntryPage, NewEntryPage } from "./pages/journal/editor-pages";
 import { EntryPage } from "./pages/journal/entry-page";
 import { JournalPage } from "./pages/journal/journal-page";
 import { NotFound } from "./pages/not-found";
+import { PlacesPage } from "./pages/places-page";
 import { SettingsPage } from "./pages/settings-page";
 import { StatePage } from "./pages/states/state-page";
 import { TripPage } from "./pages/trips/trip-page";
@@ -69,6 +70,7 @@ function App() {
               <Route path="/states/:code" element={<StatePage />} />
               <Route path="/cities" element={<CitiesPage />} />
               <Route path="/cities/:id" element={<CityPage />} />
+              <Route path="/places" element={<PlacesPage />} />
               <Route path="/trips" element={<TripsPage />} />
               <Route path="/trips/:id" element={<TripPage />} />
               <Route path="/albums" element={<AlbumsPage />} />

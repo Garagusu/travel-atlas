@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BASE, getMapStatuses, getStateStatuses, getStats, useStore } from "@/lib/store";
+import { BASE, getMapPlaces, getMapStatuses, getStateStatuses, getStats, useStore } from "@/lib/store";
 import type { StatesGeo, StatusCode } from "./types";
 
 let statesPromise: Promise<StatesGeo> | null = null;
@@ -11,6 +11,7 @@ export function useAtlasData({ withBaseCities = true }: { withBaseCities?: boole
   const mine = useStore(() => getMapStatuses().map((c) => ({ ...c, pop: c.pop, s: c.s as StatusCode })));
   const stateStatus = useStore(getStateStatuses);
   const stats = useStore(getStats);
+  const places = useStore(getMapPlaces);
 
   useEffect(() => {
     statesPromise ??= fetch(new URL("data/states.json", document.baseURI)).then((r) => {
@@ -29,6 +30,7 @@ export function useAtlasData({ withBaseCities = true }: { withBaseCities?: boole
     mine,
     stateStatus,
     stats,
+    places,
     error,
     refresh: async () => {},
     setLocalStatus: (..._args: unknown[]) => {},

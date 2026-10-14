@@ -234,6 +234,13 @@
 .tj-city-visited {
   color: var(--color-pine-deep);
 }
+.tj-place-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-ink);
+  white-space: nowrap;
+  text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff;
+}
 .tj-city-want {
   color: #8a5d10;
 }

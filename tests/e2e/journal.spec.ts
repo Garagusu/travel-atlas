@@ -9,7 +9,23 @@ test.describe.configure({ mode: "serial" });
 
 let page: Page;
 test.beforeAll(async ({ browser }) => {
-  page = await browser.newPage();
+  page = await browser.newPage({ permissions: ["clipboard-read", "clipboard-write"] });
+  // OpenStreetMap place search, answered locally so tests don't depend on the network
+  await page.route("https://nominatim.openstreetmap.org/**", (route) =>
+    route.fulfill({
+      json: [
+        {
+          lat: "42.3634156",
+          lon: "-71.0559294",
+          name: "Neptune Oyster",
+          display_name: "Neptune Oyster, 63, Salem Street, North End, Boston, Massachusetts, 02113, United States",
+          category: "amenity",
+          type: "restaurant",
+          address: { house_number: "63", road: "Salem Street", city: "Boston", state: "Massachusetts" },
+        },
+      ],
+    }),
+  );
 });
 
 async function login(p: Page, who = OWNER) {
@@ -155,30 +171,74 @@ test("city page: upload photos, reject bad files, caption and cover", async () =
   await expect(page.getByText("Harbor at dusk").first()).toBeVisible();
 });
 
-test("city page: saved places can be added, edited and deleted", async () => {
+test("city page: find a place by name, paste a map link, edit and delete", async () => {
   await page.getByRole("button", { name: "Add a place" }).click();
   await page.getByRole("button", { name: "Save place" }).click();
   await expect(page.getByText("Give the place a name")).toBeVisible();
-  await page.getByLabel("Name", { exact: true }).fill("Neptune Oyster");
-  await page.getByLabel("Kind").selectOption("restaurant");
+
+  await page.getByLabel("Find the place").fill("Neptune Oyster");
+  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("list", { name: "Search results" }).getByRole("button", { name: /Neptune Oyster/ }).click();
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Neptune Oyster");
+  await expect(page.getByLabel("Address")).toHaveValue("63 Salem Street, Boston, Massachusetts");
+  await expect(page.getByLabel("Kind")).toHaveValue("restaurant");
+  await expect(page.getByText(/Location set \(42\.3634, -71\.0559\)/)).toBeVisible();
   await page.getByRole("checkbox", { name: "A favorite" }).check();
-  await page.getByRole("region", { name: "Location map" }).first().click({ position: { x: 120, y: 120 } });
-  await expect(page.getByText(/Pinned at/)).toBeVisible();
+  await page.getByLabel("Notes", { exact: true }).fill("Hot lobster roll.");
   await page.getByRole("button", { name: "Save place" }).click();
   await expect(page.getByText("Neptune Oyster saved")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Edit Neptune Oyster" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open in Maps" }).first()).toHaveAttribute("href", /google\.com\/maps\/search\/\?api=1&query=Neptune%20Oyster/);
+
+  // second place from a pasted Google Maps link
+  await page.getByRole("button", { name: "Add a place" }).click();
+  await page.getByLabel("Google Maps link (optional)").fill(
+    "https://www.google.com/maps/place/Museum+of+Fine+Arts,+Boston/@42.33,-71.09,17z/data=!3d42.3393849!4d-71.0940447",
+  );
+  await expect(page.getByText("Location taken from the link.")).toBeVisible();
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Museum of Fine Arts, Boston");
+  await page.getByLabel("Kind").selectOption("museum");
+  await page.getByRole("button", { name: "Save place" }).click();
+  await expect(page.getByText("Museum of Fine Arts, Boston saved")).toBeVisible();
+
+  // sharing the city's picks copies a readable list (no share sheet in headless Chrome)
+  await page.getByRole("button", { name: "Share my picks in Boston" }).click();
+  await expect(page.getByText("Copied — paste it into a message")).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("My picks in Boston");
+  expect(copied).toContain("★ Neptune Oyster (Restaurant)");
+  expect(copied).toContain("Museum of Fine Arts, Boston (Museum)");
 
   await page.getByRole("button", { name: "Edit Neptune Oyster" }).click();
-  await page.getByLabel("Notes", { exact: true }).fill("Lobster roll, hot.");
+  await page.getByLabel("Notes", { exact: true }).fill("Hot lobster roll, go at opening.");
   await page.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.getByText("Lobster roll, hot.")).toBeVisible();
+  await expect(page.getByText("Hot lobster roll, go at opening.")).toBeVisible();
 
-  await page.getByRole("button", { name: "Delete Neptune Oyster" }).click();
+  await page.getByRole("button", { name: "Delete Museum of Fine Arts, Boston" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByText("Neptune Oyster deleted")).toBeVisible();
+  await expect(page.getByText("Museum of Fine Arts, Boston deleted")).toBeVisible();
+});
+
+test("places page lists, filters and links saved places to the map", async () => {
+  await page.goto("/places");
+  await expect(page.getByRole("heading", { level: 1, name: "Places" })).toBeVisible();
+  await expect(page.getByText("Hot lobster roll, go at opening.")).toBeVisible();
+  await page.getByRole("link", { name: /Restaurant/ }).first().click();
+  await expect(page).toHaveURL(/category=restaurant/);
+  await expect(page.getByText("Neptune Oyster")).toBeVisible();
+  await page.getByLabel("Search places").fill("nothing like this");
+  await page.getByRole("button", { name: "Search" }).click();
+  await expect(page.getByText("Nothing matches")).toBeVisible();
+  await page.goto("/places");
+  await page.getByRole("link", { name: "On my map" }).first().click();
+  const popup = page.locator(".maplibregl-popup");
+  await expect(popup.getByText("Neptune Oyster")).toBeVisible();
+  await expect(popup.getByRole("link", { name: "Open in Maps" })).toHaveAttribute("href", /google\.com\/maps/);
 });
 
 test("albums: create from a selection, reorder, and delete without losing photos", async () => {
+  await page.goto("/places");
+  await page.getByRole("link", { name: "Boston", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Boston" })).toBeVisible();
   await page.getByRole("button", { name: "Select", exact: true }).click();
   await page.getByRole("button", { name: "Select all" }).click();
   await page.getByRole("button", { name: "Add to album" }).click();
@@ -221,6 +281,7 @@ test("trips: create, add stops that share city records, reorder", async () => {
   await expect(stops).toHaveCount(2);
   await expect(stops.first()).toContainText("Boston");
   await page.getByRole("button", { name: "Move Portland earlier" }).click();
+  await expect(page.getByText("Route updated")).toBeVisible();
   await expect(stops.first()).toContainText("Portland");
   await page.reload();
   await expect(page.locator("ol > li").first()).toContainText("Portland");

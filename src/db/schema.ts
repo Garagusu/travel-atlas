@@ -133,6 +133,7 @@ export const stateLogs = pgTable(
 
 export const placeCategory = pgEnum("place_category", [
   "restaurant",
+  "museum",
   "attraction",
   "activity",
   "cafe",
@@ -156,6 +157,7 @@ export const places = pgTable(
       .references(() => cities.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     category: placeCategory("category").notNull().default("attraction"),
+    address: text("address"),
     notes: text("notes"),
     url: text("url"),
     lat: doublePrecision("lat"),

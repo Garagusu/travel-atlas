@@ -10,14 +10,16 @@ import { StatusControl, type Status } from "@/components/status-control";
 import { TileGrid } from "@/components/tile-grid";
 import { useToast } from "@/components/ui/toast";
 import { REGION_VIEWS, STATE_BY_CODE, stateName } from "@/lib/states-meta";
+import { PlaceCard } from "./place-card";
 import { USMap, type USMapHandle } from "./us-map";
-import { CODE_FROM_STATUS, STATUS_FROM_CODE, type CityPick, type MapStats, type StatusCode, type StatusFilter } from "./types";
+import { CODE_FROM_STATUS, STATUS_FROM_CODE, type CityPick, type MapPlace, type MapStats, type StatusCode, type StatusFilter } from "./types";
 import { useAtlasData } from "./use-atlas-data";
 
 const FILTERS: { key: keyof StatusFilter; label: string; swatch: string }[] = [
   { key: "visited", label: "Visited", swatch: "bg-pine" },
   { key: "want", label: "Want to visit", swatch: "bg-marigold-bright" },
   { key: "none", label: "Not visited", swatch: "bg-[#9aa3a6]" },
+  { key: "places", label: "Saved places", swatch: "bg-[#c2410c]" },
 ];
 
 export function MapExplorer({ userName = "" }: { userName?: string }) {
@@ -26,7 +28,7 @@ export function MapExplorer({ userName = "" }: { userName?: string }) {
   const router = useRouter();
   const params = useSearchParams();
   const toast = useToast();
-  const [filter, setFilter] = useState<StatusFilter>({ visited: true, want: true, none: true });
+  const [filter, setFilter] = useState<StatusFilter>({ visited: true, want: true, none: true, places: true });
   const [selectedState, setSelectedState] = useState<string | null>(null);
   const [city, setCity] = useState<CityPick | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -52,6 +54,26 @@ export function MapExplorer({ userName = "" }: { userName?: string }) {
       if (fly) mapRef.current?.flyToCity(c, Math.max(map.getZoom(), 8));
     },
     [popupNode],
+  );
+
+  /* saved-place popup */
+  const placeNode = useMemo(() => (typeof document !== "undefined" ? document.createElement("div") : null), []);
+  const placePopupRef = useRef<maplibregl.Popup | null>(null);
+  const [place, setPlace] = useState<MapPlace | null>(null);
+  const openPlace = useCallback(
+    (p: MapPlace) => {
+      const map = mapRef.current?.map();
+      if (!map || !placeNode) return;
+      popupRef.current?.remove();
+      placePopupRef.current?.remove();
+      setPlace(p);
+      placePopupRef.current = new maplibregl.Popup({ closeButton: false, maxWidth: "300px", offset: 10, focusAfterOpen: false })
+        .setLngLat([p.lon, p.lat])
+        .setDOMContent(placeNode)
+        .addTo(map);
+      placePopupRef.current.on("close", () => setPlace((cur) => (cur?.id === p.id ? null : cur)));
+    },
+    [placeNode],
   );
 
   const selectState = useCallback((code: string) => {
@@ -87,6 +109,15 @@ export function MapExplorer({ userName = "" }: { userName?: string }) {
     if (!mapReady || handledParams.current) return;
     const st = params.get("state")?.toUpperCase();
     const cid = Number(params.get("city"));
+    const pid = params.get("place");
+    if (pid) {
+      const p = data.places.find((x) => x.id === pid);
+      if (!p) return; // wait until places have loaded
+      handledParams.current = true;
+      mapRef.current?.flyToCity(p, 14);
+      openPlace(p);
+      return;
+    }
     if (st && STATE_BY_CODE.has(st)) {
       handledParams.current = true;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- reacting to the map becoming ready
@@ -103,7 +134,7 @@ export function MapExplorer({ userName = "" }: { userName?: string }) {
         if (i >= 0) openCity({ id: cid, name: b.names[i], state: b.states[i], pop: b.pop[i], s: 0, lon: b.lon[i], lat: b.lat[i] }, true);
       }
     } else handledParams.current = true;
-  }, [mapReady, params, mineById, data.baseCities, selectState, openCity]);
+  }, [mapReady, params, mineById, data.baseCities, data.places, selectState, openCity, openPlace]);
 
   const stats = data.stats;
   const selectedCities = useMemo(
@@ -166,6 +197,8 @@ export function MapExplorer({ userName = "" }: { userName?: string }) {
             selectedState={selectedState}
             onCityClick={(c) => openCity(c)}
             onStateClick={selectState}
+            places={data.places}
+            onPlaceClick={openPlace}
             onReady={() => setMapReady(true)}
           />
         )}
@@ -237,6 +270,7 @@ export function MapExplorer({ userName = "" }: { userName?: string }) {
           </div>,
           popupNode,
         )}
+      {placeNode && place && createPortal(<PlaceCard place={place} onClose={() => placePopupRef.current?.remove()} />, placeNode)}
     </div>
   );
 }
@@ -291,7 +325,7 @@ function PanelContent({
         <p className="text-sm font-semibold mb-2">Show on map</p>
         <div className="flex flex-wrap gap-1.5">
           {FILTERS.map((f) => (
-            <button key={f.key} className="chip toggle" aria-pressed={filter[f.key]} onClick={() => setFilter({ ...filter, [f.key]: !filter[f.key] })}>
+            <button key={f.key} className="chip toggle" aria-pressed={filter[f.key] !== false} onClick={() => setFilter({ ...filter, [f.key]: filter[f.key] === false })}>
               <span className={`h-2.5 w-2.5 rounded-full ${f.swatch} ring-1 ring-white`} aria-hidden />
               {f.label}
             </button>

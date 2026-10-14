@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/db";
 import { albumPhotos, albums, cities, cityLogs, journalEntries, journalPhotos, photos, places, tripStops, trips, users } from "@/db/schema";
-import { getMapStatuses, getStateDetail, getStats, getTrip, listMyCities, listPhotosPage, searchPlaces, wishlist } from "@/lib/data";
+import { getMapStatuses, getStateDetail, getStats, getTrip, listAllPlaces, listMyCities, listPhotosPage, searchPlaces, wishlist } from "@/lib/data";
 import { buildExport } from "@/lib/export";
 
 let me: string;
@@ -147,7 +147,15 @@ describe("photo paging and export", () => {
     await db.insert(albumPhotos).values({ albumId: al.id, photoId: ph.id });
     const [je] = await db.insert(journalEntries).values({ userId: me, title: "Harbor walk", entryDate: "2024-10-05", cityId: ids.Boston }).returning();
     await db.insert(journalPhotos).values({ entryId: je.id, photoId: ph.id });
-    await db.insert(places).values({ userId: me, cityId: ids.Boston, name: "Neptune Oyster", category: "restaurant" });
+    await db.insert(places).values({ userId: me, cityId: ids.Boston, name: "Neptune Oyster", category: "restaurant", address: "63 Salem St" });
+    await db.insert(places).values({ userId: me, cityId: ids.Boston, name: "Museum of Fine Arts", category: "museum", lat: 42.3394, lon: -71.0940 });
+    await db.insert(places).values({ userId: other, cityId: ids.Boston, name: "Someone else's spot", category: "bar" });
+
+    const all = await listAllPlaces(me);
+    expect(all.map((p) => p.name).sort()).toEqual(["Museum of Fine Arts", "Neptune Oyster"]);
+    expect((await listAllPlaces(me, { category: "museum" })).map((p) => p.name)).toEqual(["Museum of Fine Arts"]);
+    expect((await listAllPlaces(me, { q: "salem" })).map((p) => p.name)).toEqual(["Neptune Oyster"]);
+    expect(await listAllPlaces(me, { state: "CA" })).toHaveLength(0);
 
     const ex = await buildExport(me);
     expect(ex.format).toBe("us-travel-journal");
@@ -156,7 +164,8 @@ describe("photo paging and export", () => {
     expect(ex.trips.map((t) => t.name).sort()).toEqual(["Boston Weekend", "New England Fall Road Trip"]);
     expect(ex.albumPhotos).toHaveLength(1);
     expect(ex.journalPhotos).toHaveLength(1);
-    expect(ex.places[0].name).toBe("Neptune Oyster");
+    expect(ex.places.map((p) => p.name).sort()).toEqual(["Museum of Fine Arts", "Neptune Oyster"]);
+    expect(ex.places.find((p) => p.name === "Neptune Oyster")?.address).toBe("63 Salem St");
     expect(ex.cities.find((c) => c.id === ids.Boston)).toMatchObject({ name: "Boston", stateCode: "MA" });
     expect(ex.cityLogs.every((l) => l.userId === me)).toBe(true);
   });

@@ -23,6 +23,7 @@ export const PLACE_CATEGORY_LABEL = {
   restaurant: "Restaurant",
   cafe: "Café",
   bar: "Bar",
+  museum: "Museum",
   attraction: "Attraction",
   activity: "Activity",
   park: "Park or trail",

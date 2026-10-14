@@ -51,7 +51,22 @@ export type CityPick = {
   lat: number;
 };
 
-export type StatusFilter = { visited: boolean; want: boolean; none: boolean };
+export type StatusFilter = { visited: boolean; want: boolean; none: boolean; places?: boolean };
+
+export type MapPlace = {
+  id: string;
+  name: string;
+  category: string;
+  address: string | null;
+  notes: string | null;
+  favorite: boolean;
+  cityId: number;
+  cityName: string;
+  stateCode: string;
+  lat: number;
+  lon: number;
+  pinned: boolean;
+};
 
 export const STATUS_FROM_CODE = ["not_visited", "want_to_visit", "visited"] as const;
 export const CODE_FROM_STATUS = { not_visited: 0, want_to_visit: 1, visited: 2 } as const;

@@ -686,3 +686,36 @@ export async function nearbyCities(lat: number, lon: number, excludeId: number, 
     .orderBy(desc(cities.population))
     .limit(limit);
 }
+
+/** Every saved place with its city, for the Places page and the main map. */
+export async function listAllPlaces(userId: string, f: { category?: string; state?: string; q?: string } = {}) {
+  const where: SQL[] = [eq(places.userId, userId)];
+  if (f.category) where.push(sql`${places.category}::text = ${f.category}`);
+  if (f.state) where.push(eq(cities.stateCode, f.state.toUpperCase()));
+  if (f.q) {
+    const t = `%${f.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
+    where.push(or(ilike(places.name, t), ilike(places.notes, t), ilike(places.address, t), ilike(cities.name, t))!);
+  }
+  return db
+    .select({
+      id: places.id,
+      name: places.name,
+      category: places.category,
+      address: places.address,
+      notes: places.notes,
+      url: places.url,
+      lat: places.lat,
+      lon: places.lon,
+      favorite: places.favorite,
+      createdAt: places.createdAt,
+      cityId: cities.id,
+      cityName: cities.name,
+      stateCode: cities.stateCode,
+      cityLat: cities.lat,
+      cityLon: cities.lon,
+    })
+    .from(places)
+    .innerJoin(cities, eq(cities.id, places.cityId))
+    .where(and(...where))
+    .orderBy(asc(cities.stateCode), asc(cities.name), desc(places.favorite), asc(places.name));
+}

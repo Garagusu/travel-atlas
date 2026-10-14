@@ -64,6 +64,7 @@ export const cityLogSchema = z
 export const placeSchema = z.object({
   name: z.string().trim().min(1, "Give the place a name").max(120),
   category: z.enum(Object.keys(PLACE_CATEGORY_LABEL) as [keyof typeof PLACE_CATEGORY_LABEL]),
+  address: optionalText(300),
   notes: optionalText(2000),
   url: z
     .union([z.literal(""), z.string().trim().url("Enter a full link starting with https://")])

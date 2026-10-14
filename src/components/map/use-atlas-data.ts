@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { BaseCities, MapStats, MyCity, StateStatus, StatesGeo, StatusCode } from "./types";
+import type { BaseCities, MapPlace, MapStats, MyCity, StateStatus, StatesGeo, StatusCode } from "./types";
 
-type StatusPayload = { cities: (MyCity & { status?: string })[]; states: StateStatus[]; stats: MapStats };
+type StatusPayload = { cities: (MyCity & { status?: string })[]; states: StateStatus[]; stats: MapStats; places: MapPlace[] };
 
 let statesPromise: Promise<StatesGeo> | null = null;
 let basePromise: Promise<BaseCities> | null = null;
@@ -26,6 +26,7 @@ export function useAtlasData({ withBaseCities = true }: { withBaseCities?: boole
   const [mine, setMine] = useState<MyCity[]>([]);
   const [stateStatus, setStateStatus] = useState<StateStatus[]>([]);
   const [stats, setStats] = useState<MapStats | null>(null);
+  const [places, setPlaces] = useState<MapPlace[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -34,6 +35,7 @@ export function useAtlasData({ withBaseCities = true }: { withBaseCities?: boole
       setMine(data.cities.map((c) => ({ ...c, s: c.s as StatusCode })));
       setStateStatus(data.states);
       setStats(data.stats);
+      setPlaces(data.places ?? []);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -67,5 +69,5 @@ export function useAtlasData({ withBaseCities = true }: { withBaseCities?: boole
     });
   }, []);
 
-  return { statesGeo, baseCities, mine, stateStatus, stats, error, refresh, setLocalStatus };
+  return { statesGeo, baseCities, mine, stateStatus, stats, places, error, refresh, setLocalStatus };
 }

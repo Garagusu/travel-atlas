@@ -91,7 +91,10 @@ export function Itinerary({ tripId, stops: initial }: { tripId: string; stops: S
       if (!res.ok) {
         setStops(stops);
         toast(res.error, "error");
-      } else router.refresh();
+      } else {
+        toast("Route updated");
+        router.refresh();
+      }
     });
   };
 

@@ -3,7 +3,8 @@ import type { GeoJSONSource, LngLatBoundsLike, Map as MLMap, MapGeoJSONFeature, 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { REGION_VIEWS, STATE_BY_CODE } from "@/lib/states-meta";
 import { atlasStyle, basemapStyleUrl, MAP_COLORS } from "./map-style";
-import type { BaseCities, CityPick, MyCity, StateStatus, StatesGeo, StatusCode, StatusFilter } from "./types";
+import { CATEGORY_COLORS } from "@/lib/places-util";
+import type { BaseCities, CityPick, MapPlace, MyCity, StateStatus, StatesGeo, StatusCode, StatusFilter } from "./types";
 
 // MapLibre's worker can't be resolved from inside the bundle; it is copied to /public on install.
 if (typeof window !== "undefined") maplibregl.setWorkerUrl(new URL("maplibre/maplibre-gl-worker.mjs", document.baseURI).href);
@@ -25,6 +26,8 @@ type Props = {
   compact?: boolean;
   onCityClick?: (c: CityPick) => void;
   onStateClick?: (code: string) => void;
+  onPlaceClick?: (p: MapPlace) => void;
+  places?: MapPlace[];
   onReady?: () => void;
   className?: string;
 };
@@ -60,7 +63,7 @@ function boundsFor(code: string, geo: StatesGeo): LngLatBoundsLike | null {
 }
 
 export const USMap = forwardRef<USMapHandle, Props>(function USMap(
-  { statesGeo, baseCities, mine, stateStatus, filter, selectedState, compact, onCityClick, onStateClick, onReady, className },
+  { statesGeo, baseCities, mine, stateStatus, filter, selectedState, compact, onCityClick, onStateClick, onPlaceClick, places, onReady, className },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null);
@@ -68,10 +71,11 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
   const [loaded, setLoaded] = useState(false);
   const [hover, setHover] = useState<Hover>(null);
   const [styleError, setStyleError] = useState(false);
-  const callbacks = useRef({ onCityClick, onStateClick });
+  const callbacks = useRef({ onCityClick, onStateClick, onPlaceClick });
   useEffect(() => {
-    callbacks.current = { onCityClick, onStateClick };
+    callbacks.current = { onCityClick, onStateClick, onPlaceClick };
   });
+  const placesById = useRef(new Map<string, MapPlace>());
   const usingBasemap = !!basemapStyleUrl() && !styleError;
 
   const fipsByCode = useMemo(() => new Map(statesGeo.features.map((f) => [f.properties.code, Number(f.properties.fips)])), [statesGeo]);
@@ -200,6 +204,21 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
       mineLayer("mine-want", 1, MAP_COLORS.marigold, [4, 7.5]);
       mineLayer("mine-visited", 2, MAP_COLORS.pine, [4.6, 8.5]);
 
+      // saved places (restaurants, museums…), visible once zoomed in to city level
+      map.addSource("places", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: "places",
+        type: "circle",
+        source: "places",
+        minzoom: 7,
+        paint: {
+          "circle-color": ["match", ["get", "c"], ...Object.entries(CATEGORY_COLORS).flat(), "#57534e"] as never,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 3, 12, 6.5, 15, 8],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": ["case", ["get", "f"], 2.5, 1.5],
+        },
+      });
+
       /* ---------- interaction ---------- */
       let hoveredState: number | null = null;
       const setStateHover = (id: number | null) => {
@@ -214,7 +233,21 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
         return map.queryRenderedFeatures([[p.x - pad, p.y - pad], [p.x + pad, p.y + pad]], { layers })[0];
       };
 
+      const placeAt = (pt: maplibregl.PointLike) => {
+        if (!map.getLayer("places") || map.getLayoutProperty("places", "visibility") === "none") return undefined;
+        const p = maplibregl.Point.convert(pt);
+        return map.queryRenderedFeatures([[p.x - 6, p.y - 6], [p.x + 6, p.y + 6]], { layers: ["places"] })[0];
+      };
+
       map.on("mousemove", (e: MapMouseEvent) => {
+        const place = placeAt(e.point);
+        if (place) {
+          setStateHover(null);
+          map.getCanvas().style.cursor = "pointer";
+          const pl = placesById.current.get(String(place.properties.id));
+          setHover({ x: e.point.x, y: e.point.y, title: pl?.name ?? "", sub: pl ? pl.cityName : undefined });
+          return;
+        }
         const city = cityAt(e.point);
         if (city) {
           setStateHover(null);
@@ -246,6 +279,12 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
       map.on("movestart", () => setHover(null));
 
       map.on("click", (e: MapMouseEvent) => {
+        const place = placeAt(e.point);
+        if (place) {
+          const pl = placesById.current.get(String(place.properties.id));
+          if (pl) callbacks.current.onPlaceClick?.(pl);
+          return;
+        }
         const city = cityAt(e.point);
         if (city) {
           const pr = city.properties as { id: number; n: string; st: string; p: number; s?: number };
@@ -297,6 +336,22 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
     (map.getSource("mine") as GeoJSONSource).setData({ type: "FeatureCollection", features });
   }, [loaded, mine]);
 
+  /* ---------------- saved places ---------------- */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!loaded || !map) return;
+    const pinned = (places ?? []).filter((p) => p.pinned);
+    placesById.current = new Map(pinned.map((p) => [p.id, p]));
+    (map.getSource("places") as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: pinned.map((p) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [p.lon, p.lat] },
+        properties: { id: p.id, c: p.category, f: p.favorite },
+      })),
+    });
+  }, [loaded, places]);
+
   /* ---------------- state colours + filters ---------------- */
   useEffect(() => {
     const map = mapRef.current;
@@ -314,6 +369,7 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
     map.setLayoutProperty("mine-none", "visibility", vis(filter.none));
     map.setLayoutProperty("mine-want", "visibility", vis(filter.want));
     map.setLayoutProperty("mine-visited", "visibility", vis(filter.visited));
+    map.setLayoutProperty("places", "visibility", vis(filter.places !== false));
   }, [loaded, stateStatus, filter, fipsByCode]);
 
   /* ---------------- selected state outline ---------------- */
@@ -331,14 +387,14 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
   useEffect(() => {
     const map = mapRef.current;
     if (!loaded || !map) return;
-    type Label = { el: HTMLDivElement; marker: maplibregl.Marker; kind: "state" | "city"; priority: number; lngLat: [number, number] };
+    type Label = { el: HTMLDivElement; marker: maplibregl.Marker; kind: "state" | "city" | "place"; priority: number; lngLat: [number, number] };
     const labels: Label[] = [];
     const make = (text: string, cls: string, lngLat: [number, number], kind: Label["kind"], priority: number, offsetY = 0) => {
       const el = document.createElement("div");
       el.className = cls;
       el.textContent = text;
       el.style.pointerEvents = "none";
-      const marker = new maplibregl.Marker({ element: el, anchor: kind === "city" ? "left" : "center", offset: [kind === "city" ? 9 : 0, offsetY] })
+      const marker = new maplibregl.Marker({ element: el, anchor: kind === "state" ? "center" : "left", offset: [kind === "city" ? 9 : kind === "place" ? 8 : 0, offsetY] })
         .setLngLat(lngLat)
         .addTo(map);
       labels.push({ el, marker, kind, priority, lngLat });
@@ -354,6 +410,13 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
       make(c.name, c.s === 2 ? "tj-city-label tj-city-visited" : "tj-city-label tj-city-want", [c.lon, c.lat], "city", Math.log10(c.pop + 10) + c.s);
     }
 
+    if (filter.places !== false) {
+      for (const p of places ?? []) {
+        if (!p.pinned) continue;
+        make(p.name, "tj-place-label", [p.lon, p.lat], "place", p.favorite ? 1.5 : 1);
+      }
+    }
+
     const layout = () => {
       const z = map.getZoom();
       const order = [...labels].sort((a, b) => {
@@ -365,7 +428,7 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
       const placed: DOMRect[] = [];
       const { width, height } = map.getContainer().getBoundingClientRect();
       for (const l of order) {
-        if (l.kind === "state" && z > 6.5) {
+        if ((l.kind === "state" && z > 6.5) || (l.kind === "place" && z < 10)) {
           l.el.style.visibility = "hidden";
           continue;
         }
@@ -376,7 +439,7 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
         }
         const w = l.el.offsetWidth || l.el.textContent!.length * 7;
         const h = l.el.offsetHeight || 14;
-        const x = l.kind === "city" ? p.x + 9 : p.x - w / 2;
+        const x = l.kind === "city" ? p.x + 9 : l.kind === "place" ? p.x + 8 : p.x - w / 2;
         const r = new DOMRect(x - 2, p.y - h / 2 - 1, w + 4, h + 2);
         const hit = placed.some((q) => r.left < q.right && r.right > q.left && r.top < q.bottom && r.bottom > q.top);
         l.el.style.visibility = hit ? "hidden" : "visible";
@@ -391,7 +454,7 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
       map.off("zoomend", layout);
       labels.forEach((l) => l.marker.remove());
     };
-  }, [loaded, mine, statesGeo, filter, usingBasemap]);
+  }, [loaded, mine, statesGeo, filter, usingBasemap, places]);
 
   return (
     <div className={className ?? "relative"}>

@@ -532,3 +532,45 @@ export async function reloadFromDb() {
   }
   emit();
 }
+
+/* ------------------------------------------------------------------ */
+/* Saved places                                                        */
+/* ------------------------------------------------------------------ */
+
+export function listAllPlaces(f: { category?: string; state?: string; q?: string } = {}) {
+  const q = f.q ? norm(f.q) : null;
+  return vals(R.places)
+    .map((p) => {
+      const c = cityById(p.cityId);
+      return c ? { ...p, address: p.address ?? null, cityName: c.name, stateCode: c.state, cityLat: c.lat, cityLon: c.lon } : null;
+    })
+    .filter((p): p is NonNullable<typeof p> => !!p)
+    .filter((p) => !f.category || p.category === f.category)
+    .filter((p) => !f.state || p.stateCode === f.state.toUpperCase())
+    .filter((p) => !q || [p.name, p.notes ?? "", p.address ?? "", p.cityName].some((s) => norm(s).includes(q)))
+    .sort(
+      (a, b) =>
+        a.stateCode.localeCompare(b.stateCode) ||
+        a.cityName.localeCompare(b.cityName) ||
+        Number(b.favorite) - Number(a.favorite) ||
+        a.name.localeCompare(b.name),
+    );
+}
+
+/** Places for the main map; unpinned places sit at their city. */
+export function getMapPlaces() {
+  return listAllPlaces().map((p) => ({
+    id: p.id,
+    name: p.name,
+    category: p.category,
+    address: p.address,
+    notes: p.notes,
+    favorite: p.favorite,
+    cityId: p.cityId,
+    cityName: p.cityName,
+    stateCode: p.stateCode,
+    lat: p.lat ?? p.cityLat,
+    lon: p.lon ?? p.cityLon,
+    pinned: p.lat !== null,
+  }));
+}

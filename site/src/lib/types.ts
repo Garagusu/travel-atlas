@@ -26,13 +26,14 @@ export type CityLog = {
 
 export type StateLog = { code: string; notes: string | null; coverPhotoId: string | null; updatedAt: string };
 
-export type PlaceCategory = "restaurant" | "attraction" | "activity" | "cafe" | "bar" | "hotel" | "park" | "shop" | "other";
+export type PlaceCategory = "restaurant" | "museum" | "attraction" | "activity" | "cafe" | "bar" | "hotel" | "park" | "shop" | "other";
 
 export type Place = {
   id: string;
   cityId: number;
   name: string;
   category: PlaceCategory;
+  address?: string | null;
   notes: string | null;
   url: string | null;
   lat: number | null;

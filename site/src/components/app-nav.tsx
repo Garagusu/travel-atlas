@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/dashboard", label: "Overview" },
   { href: "/trips", label: "My Trips" },
   { href: "/cities", label: "Cities" },
+  { href: "/places", label: "Places" },
   { href: "/albums", label: "Photo Albums" },
   { href: "/journal", label: "Travel Journal" },
   { href: "/wishlist", label: "Wishlist" },
