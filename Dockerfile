@@ -13,8 +13,9 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000
 COPY --from=build /app ./
-RUN mkdir -p /app/storage/uploads && chown -R node:node /app/storage
-USER node
+RUN mkdir -p /app/storage/uploads
+# Runs as root so it can always write to a mounted volume (Railway, Fly and
+# Docker volumes are often owned by root).
 EXPOSE 3000
 # Migrations and the geo seed are idempotent, so running them on every start is safe.
 CMD ["sh", "-c", "npm run db:setup && npx next start -p ${PORT}"]
