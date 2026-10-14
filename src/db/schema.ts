@@ -327,3 +327,21 @@ export type Album = typeof albums.$inferSelect;
 export type JournalEntry = typeof journalEntries.$inferSelect;
 export type Place = typeof places.$inferSelect;
 export type VisitStatus = (typeof visitStatus.enumValues)[number];
+
+/** Public, revocable links to a read-only list of recommendations. */
+export const shareLinks = pgTable(
+  "share_links",
+  {
+    /** random URL token */
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** null = all saved places */
+    cityId: integer("city_id").references(() => cities.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [index("share_links_user_idx").on(t.userId)],
+);
+export type ShareLink = typeof shareLinks.$inferSelect;

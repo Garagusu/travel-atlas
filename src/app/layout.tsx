@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: { default: "Travel Atlas", template: "%s · Travel Atlas" },
   description: "A private journal of the places you've been across the United States.",
   robots: { index: false, follow: false },
+  appleWebApp: { capable: true, title: "Travel Atlas", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = { themeColor: "#faf8f4", width: "device-width", initialScale: 1 };

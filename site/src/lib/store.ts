@@ -574,3 +574,25 @@ export function getMapPlaces() {
     pinned: p.lat !== null,
   }));
 }
+
+/** The closest city to a point (within maxKm), for filing photos by their GPS location. */
+export function nearestCity(lat: number, lon: number, maxKm = 25): CityRef | null {
+  const r = Math.PI / 180;
+  const km = (bLat: number, bLon: number) => {
+    const h = Math.sin(((bLat - lat) * r) / 2) ** 2 + Math.cos(lat * r) * Math.cos(bLat * r) * Math.sin(((bLon - lon) * r) / 2) ** 2;
+    return 12742 * Math.asin(Math.sqrt(h));
+  };
+  const dLat = maxKm / 111;
+  let best: CityRef | null = null;
+  let bestKm = maxKm;
+  for (let i = 0; i < BASE.ids.length; i++) {
+    if (Math.abs(BASE.lat[i] - lat) > dLat) continue;
+    const d = km(BASE.lat[i], BASE.lon[i]);
+    if (d <= bestKm) [best, bestKm] = [cityById(BASE.ids[i]), d];
+  }
+  for (const c of R.customCities.values()) {
+    const d = km(c.lat, c.lon);
+    if (d <= bestKm) [best, bestKm] = [c, d];
+  }
+  return best;
+}

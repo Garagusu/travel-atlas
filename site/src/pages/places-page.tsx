@@ -2,6 +2,7 @@ import { ExternalLink, Heart, MapPin } from "lucide-react";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { ShareButton } from "@/components/share-button";
+import { ShareLinkButton } from "@/components/share-link-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Container, PageHeader } from "@/components/ui/page-header";
 import { PLACE_CATEGORY_LABEL } from "@/lib/constants";
@@ -39,7 +40,14 @@ export function PlacesPage() {
       <PageHeader
         title="Places"
         subtitle={all.length ? `${all.length} saved ${all.length === 1 ? "place" : "places"}: restaurants, museums and everything worth going back to.` : "Restaurants, museums and sights you want to remember or recommend."}
-        actions={list.length > 0 ? <ShareButton title={filtered ? "My picks" : "My favorite places"} places={list.map(toShare)} label="Share this list" className="btn btn-secondary" /> : undefined}
+        actions={
+          list.length > 0 ? (
+            <>
+              <ShareButton title={filtered ? "My picks" : "My favorite places"} places={list.map(toShare)} label="Share this list" className="btn btn-secondary" />
+              <ShareLinkButton cityId={null} title="My favorite places" className="btn btn-secondary" />
+            </>
+          ) : undefined
+        }
       />
       {all.length > 0 && (
         <>
@@ -103,7 +111,10 @@ export function PlacesPage() {
                   <Link href={`/cities/${group[0].cityId}`} className="hover:text-pine">{group[0].cityName}</Link>
                   <span className="text-base text-ink-soft font-sans">, {stateName(group[0].stateCode)}</span>
                 </h2>
-                <ShareButton title={`My picks in ${group[0].cityName}`} places={group.map(toShare)} />
+                <span className="flex gap-1">
+                  <ShareButton title={`My picks in ${group[0].cityName}`} places={group.map(toShare)} />
+                  <ShareLinkButton cityId={group[0].cityId} title={`My picks in ${group[0].cityName}`} />
+                </span>
               </div>
               <ul className="grid sm:grid-cols-2 gap-3">
                 {group.map((p) => (

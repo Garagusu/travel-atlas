@@ -91,6 +91,54 @@ export async function searchOsm(query: string, near?: { lat: number; lon: number
   return out;
 }
 
+type PhotonFeature = {
+  geometry: { coordinates: [number, number] };
+  properties: Record<string, string | undefined>;
+};
+
+/**
+ * Search-as-you-type suggestions from Photon (OpenStreetMap data, komoot's
+ * public server). Biased toward the city; US results only.
+ */
+const photonCache = new Map<string, FoundPlace[]>();
+export async function searchPhoton(query: string, near?: { lat: number; lon: number }, signal?: AbortSignal): Promise<FoundPlace[]> {
+  const q = query.trim();
+  if (q.length < 3) return [];
+  const key = `${q.toLowerCase()}|${near?.lat.toFixed(2)}|${near?.lon.toFixed(2)}`;
+  const hit = photonCache.get(key);
+  if (hit) return hit;
+  const params = new URLSearchParams({ q, limit: "8", lang: "en", countrycode: "us" });
+  if (near) {
+    params.set("lat", near.lat.toFixed(4));
+    params.set("lon", near.lon.toFixed(4));
+    params.set("zoom", "12");
+    params.set("location_bias_scale", "0.2");
+  }
+  const res = await fetch(`https://photon.komoot.io/api/?${params}`, { signal });
+  if (!res.ok) throw new Error(`Suggestions failed (${res.status})`);
+  const data: { features?: PhotonFeature[] } = await res.json();
+  const out: FoundPlace[] = [];
+  for (const f of data.features ?? []) {
+    const p = f.properties;
+    if (p.countrycode && p.countrycode.toUpperCase() !== "US") continue;
+    const street = [p.housenumber, p.street].filter(Boolean).join(" ");
+    const name = p.name || street;
+    if (!name) continue;
+    const town = p.city || p.town || p.village || p.district || p.county;
+    const address = [street && street !== name ? street : null, town, p.state].filter(Boolean).join(", ") || null;
+    out.push({
+      name,
+      address,
+      lat: Math.round(f.geometry.coordinates[1] * 1e5) / 1e5,
+      lon: Math.round(f.geometry.coordinates[0] * 1e5) / 1e5,
+      category: guessCategory(p.osm_key ?? "", p.osm_value ?? ""),
+      kind: (p.osm_value ?? p.type ?? "").replace(/_/g, " "),
+    });
+  }
+  photonCache.set(key, out);
+  return out;
+}
+
 /**
  * Pull coordinates (and a name when present) out of a pasted map link.
  * Supports Google Maps place/search links and Apple Maps links.
@@ -193,3 +241,18 @@ export const CATEGORY_COLORS: Record<PlaceCategoryKey, string> = {
   hotel: "#475569",
   other: "#57534e",
 };
+
+/** Share a link via the share sheet, or copy it. */
+export async function shareUrl(title: string, url: string): Promise<"shared" | "copied" | "cancelled"> {
+  const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
+  if (nav.share) {
+    try {
+      await nav.share({ title, url });
+      return "shared";
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return "cancelled";
+    }
+  }
+  await navigator.clipboard.writeText(url);
+  return "copied";
+}

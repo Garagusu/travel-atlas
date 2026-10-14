@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import bcrypt from "bcryptjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Client } from "pg";
 
 const OWNER = { name: "Ada Lovelace", email: "ada@example.com", password: "analytical-engine-1843" };
@@ -8,6 +11,7 @@ const DB = process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@localh
 test.describe.configure({ mode: "serial" });
 
 let page: Page;
+let sharedLink = "";
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ permissions: ["clipboard-read", "clipboard-write"] });
   // OpenStreetMap place search, answered locally so tests don't depend on the network
@@ -26,6 +30,28 @@ test.beforeAll(async ({ browser }) => {
       ],
     }),
   );
+  // Search-as-you-type suggestions (Photon) — answered locally too
+  await page.route("https://photon.komoot.io/**", (route) =>
+    route.fulfill({
+      json: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [-71.0559294, 42.3634156] },
+            properties: { name: "Neptune Oyster", housenumber: "63", street: "Salem Street", city: "Boston", state: "Massachusetts", countrycode: "US", osm_key: "amenity", osm_value: "restaurant" },
+          },
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [-71.05, 42.36] },
+            properties: { name: "Neptune Bar", city: "Boston", state: "Massachusetts", countrycode: "US", osm_key: "amenity", osm_value: "bar" },
+          },
+        ],
+      },
+    }),
+  );
+  // The street basemap is unreachable here; the app falls back to its own shapes
+  await page.route("https://tiles.openfreemap.org/**", (route) => route.abort());
 });
 
 async function login(p: Page, who = OWNER) {
@@ -176,9 +202,13 @@ test("city page: find a place by name, paste a map link, edit and delete", async
   await page.getByRole("button", { name: "Save place" }).click();
   await expect(page.getByText("Give the place a name")).toBeVisible();
 
-  await page.getByLabel("Find the place").fill("Neptune Oyster");
-  await page.getByRole("button", { name: "Search" }).click();
-  await page.getByRole("list", { name: "Search results" }).getByRole("button", { name: /Neptune Oyster/ }).click();
+  await page.getByRole("combobox", { name: "Name" }).pressSequentially("Neptune");
+  const suggestions = page.getByRole("listbox", { name: "Suggestions" });
+  await expect(suggestions.getByRole("option")).toHaveCount(2);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await expect(suggestions).toHaveCount(0);
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Neptune Oyster");
   await expect(page.getByLabel("Address")).toHaveValue("63 Salem Street, Boston, Massachusetts");
   await expect(page.getByLabel("Kind")).toHaveValue("restaurant");
@@ -207,6 +237,13 @@ test("city page: find a place by name, paste a map link, edit and delete", async
   expect(copied).toContain("My picks in Boston");
   expect(copied).toContain("★ Neptune Oyster (Restaurant)");
   expect(copied).toContain("Museum of Fine Arts, Boston (Museum)");
+
+  // a public link to the same list opens without signing in
+  await page.getByRole("button", { name: "Share a link: My picks in Boston" }).click();
+  await expect(page.getByText("Link copied — anyone with it can see this list")).toBeVisible();
+  const link = await page.evaluate(() => navigator.clipboard.readText());
+  expect(link).toMatch(/\/s\/[A-Za-z0-9_-]{16}$/);
+  sharedLink = new URL(link).pathname;
 
   await page.getByRole("button", { name: "Edit Neptune Oyster" }).click();
   await page.getByLabel("Notes", { exact: true }).fill("Hot lobster roll, go at opening.");
@@ -397,4 +434,96 @@ test("data survives signing out and back in", async () => {
   await page.goto("/cities?status=visited");
   await expect(page.getByRole("link", { name: /Boston/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Cambridge/ })).toBeVisible();
+});
+
+test("a shared link shows the list to anyone, until it's turned off", async ({ browser }) => {
+  const anon = await browser.newPage();
+  await anon.goto(sharedLink);
+  await expect(anon.getByRole("heading", { level: 1, name: "Boston, Massachusetts" })).toBeVisible();
+  await expect(anon.getByText("Neptune Oyster")).toBeVisible();
+  await expect(anon.getByText("Hot lobster roll, go at opening.")).toBeVisible();
+  await expect(anon.getByRole("link", { name: "Open in Maps" }).first()).toHaveAttribute("href", /google\.com\/maps/);
+  // nothing else from the journal is reachable
+  await expect(anon.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
+
+  await page.goto("/settings");
+  const links = page.getByRole("region", { name: "Shared links" });
+  await expect(links.getByText(/Boston/)).toBeVisible();
+  await links.getByRole("button", { name: /Turn off/ }).first().click();
+  await expect(links.getByText(/Boston/)).toHaveCount(0);
+  await anon.reload();
+  await expect(anon.getByRole("heading", { name: "This list isn't shared anymore" })).toBeVisible();
+  await anon.close();
+});
+
+test("photos with a location are filed under the nearest city", async () => {
+  await page.goto("/albums");
+  await page.getByLabel("Add photos").setInputFiles(["tests/fixtures/with-gps.jpg"]);
+  await expect(page.getByText("Filed in San Francisco, CA")).toBeVisible({ timeout: 20_000 });
+  const db = new Client({ connectionString: DB });
+  await db.connect();
+  const { rows } = await db.query(
+    "select c.name from photos p join cities c on c.id = p.city_id join users u on u.id = p.user_id where u.email = $1 and p.original_name = 'with-gps.jpg'",
+    [OWNER.email],
+  );
+  await db.end();
+  expect(rows).toEqual([{ name: "San Francisco" }]);
+});
+
+test("restoring a backup brings the journal back as it was", async () => {
+  const zip = await page.request.get("/api/export/archive");
+  const file = path.join(os.tmpdir(), `tj-backup-${Date.now()}.zip`);
+  fs.writeFileSync(file, await zip.body());
+  const before = await (await page.request.get("/api/export")).json();
+
+  await page.goto("/settings");
+  await page.getByLabel("Backup file").setInputFiles(file);
+  await page.getByRole("dialog").getByRole("button", { name: "Replace and restore" }).click();
+  await expect(page.getByRole("status").filter({ hasText: /^Restored \d+ cities/ })).toBeVisible({ timeout: 60_000 });
+  const after = await (await page.request.get("/api/export")).json();
+  expect(after.cityLogs.length).toBe(before.cityLogs.length);
+  expect(after.places.map((p: { name: string }) => p.name).sort()).toEqual(before.places.map((p: { name: string }) => p.name).sort());
+  expect(after.trips.map((t: { name: string }) => t.name)).toEqual(before.trips.map((t: { name: string }) => t.name));
+  expect(after.photos.length).toBe(before.photos.length);
+  expect(after.journalEntries.length).toBe(before.journalEntries.length);
+  await page.goto("/cities?status=visited");
+  await expect(page.getByRole("link", { name: /Boston/ })).toBeVisible();
+  fs.rmSync(file);
+});
+
+test("changing the password signs other devices out", async ({ browser }) => {
+  const other = await browser.newPage();
+  await login(other);
+  await page.goto("/settings");
+  const pw = page.getByRole("region", { name: "Password" });
+  await pw.getByLabel("Current password").fill("not-my-password");
+  await pw.getByLabel("New password", { exact: true }).fill("a-brand-new-password");
+  await pw.getByLabel("New password again").fill("a-brand-new-password");
+  await pw.getByRole("button", { name: "Change password" }).click();
+  await expect(pw.getByText("That isn't your current password")).toBeVisible();
+
+  await pw.getByLabel("Current password").fill(OWNER.password);
+  await pw.getByLabel("New password", { exact: true }).fill("a-brand-new-password");
+  await pw.getByLabel("New password again").fill("a-brand-new-password");
+  await pw.getByRole("button", { name: "Change password" }).click();
+  await expect(pw.getByText("Password changed. Other devices have been signed out.")).toBeVisible();
+
+  // this device stays signed in; the other one is signed out
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL("/dashboard");
+  await other.goto("/dashboard");
+  await expect(other).toHaveURL(/\/login/);
+  await login(other, { ...OWNER, password: "a-brand-new-password" });
+  await other.close();
+});
+
+test("the app can be added to the home screen", async () => {
+  const res = await page.request.get("/manifest.webmanifest");
+  expect(res.status()).toBe(200);
+  const m = await res.json();
+  expect(m.display).toBe("standalone");
+  expect(m.icons.map((i: { sizes: string }) => i.sizes)).toEqual(expect.arrayContaining(["192x192", "512x512"]));
+  expect((await page.request.get("/icon-512.png")).status()).toBe(200);
+  await page.goto("/");
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveCount(1);
 });

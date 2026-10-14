@@ -1,7 +1,7 @@
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, LngLatBoundsLike, Map as MLMap } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { atlasStyle, basemapStyleUrl, MAP_COLORS } from "./map-style";
+import { atlasStyle, basemapStyleUrl, MAP_COLORS, markBasemapFailed } from "./map-style";
 import type { StatesGeo } from "./types";
 
 if (typeof window !== "undefined") maplibregl.setWorkerUrl(new URL("maplibre/maplibre-gl-worker.mjs", document.baseURI).href);
@@ -49,6 +49,7 @@ export function MiniMap({
   const el = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const [ready, setReady] = useState(false);
+  const [styleFailed, setStyleFailed] = useState(false);
   const pickRef = useRef(onPick);
   useEffect(() => {
     pickRef.current = onPick;
@@ -56,7 +57,7 @@ export function MiniMap({
 
   useEffect(() => {
     if (!el.current) return;
-    const styleUrl = basemapStyleUrl();
+    const styleUrl = styleFailed ? null : basemapStyleUrl();
     const map = new maplibregl.Map({
       container: el.current,
       style: styleUrl ?? atlasStyle(),
@@ -103,8 +104,15 @@ export function MiniMap({
         type: "circle",
         source: "nearby",
         paint: { "circle-color": MAP_COLORS.neutralDot, "circle-radius": 2.6, "circle-stroke-color": "#fff", "circle-stroke-width": 1 },
+        layout: { visibility: styleUrl ? "none" : "visible" },
       });
       setReady(true);
+    });
+    map.on("error", () => {
+      if (styleUrl && !map.isStyleLoaded()) {
+        markBasemapFailed();
+        setStyleFailed(true);
+      }
     });
     map.on("click", (e) => pickRef.current?.({ lon: e.lngLat.lng, lat: e.lngLat.lat }));
     return () => {
@@ -113,7 +121,7 @@ export function MiniMap({
       setReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [styleFailed]);
 
   useEffect(() => {
     if (mapRef.current) mapRef.current.getCanvas().style.cursor = onPick ? "crosshair" : "";

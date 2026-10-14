@@ -2,7 +2,7 @@ import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, LngLatBoundsLike, Map as MLMap, MapGeoJSONFeature, MapMouseEvent } from "maplibre-gl";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { REGION_VIEWS, STATE_BY_CODE } from "@/lib/states-meta";
-import { atlasStyle, basemapStyleUrl, MAP_COLORS } from "./map-style";
+import { atlasStyle, basemapStyleUrl, MAP_COLORS, markBasemapFailed } from "./map-style";
 import { CATEGORY_COLORS } from "@/lib/places-util";
 import type { BaseCities, CityPick, MapPlace, MyCity, StateStatus, StatesGeo, StatusCode, StatusFilter } from "./types";
 
@@ -124,6 +124,7 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
       if (styleUrl && !map.isStyleLoaded() && !fellBack) {
         fellBack = true;
         console.warn("Basemap style failed to load; using built-in atlas style", e.error);
+        markBasemapFailed();
         setStyleError(true);
       }
     });
@@ -144,7 +145,18 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
               1, MAP_COLORS.wantFill,
               MAP_COLORS.land,
             ],
-            "fill-opacity": styleUrl ? ["match", ["coalesce", ["feature-state", "status"], 0], 0, 0, 0.6] : 1,
+            // over a street map, tint visited states at country scale and fade the tint as you zoom in
+            "fill-opacity": styleUrl
+              ? [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  4,
+                  ["match", ["coalesce", ["feature-state", "status"], 0], 0, 0, 0.55],
+                  9,
+                  ["match", ["coalesce", ["feature-state", "status"], 0], 0, 0, 0.08],
+                ]
+              : 1,
           },
         },
         firstSymbol,

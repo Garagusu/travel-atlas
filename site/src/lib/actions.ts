@@ -3,8 +3,8 @@ import { fail, ok, type ActionResult } from "./action-result";
 import { ImageError, processImage } from "./images";
 import { isValidStateCode } from "./states-meta";
 import type { StoreName } from "./db";
-import { blobKey, cityById, mutate, now, R, uid } from "./store";
-import type { Album, CityLog, JournalEntry, Photo, Place, Trip, TripStop, VisitStatus } from "./types";
+import { blobKey, cityById, mutate, nearestCity, now, R, uid } from "./store";
+import type { Album, CityLog, CityRef, JournalEntry, Photo, Place, Trip, TripStop, VisitStatus } from "./types";
 import {
   albumSchema,
   cityLogSchema,
@@ -270,7 +270,7 @@ export async function addPhotosToTrip(tripId: string, photoIds: string[]): Promi
 export type UploadTarget = { cityId?: number; tripId?: string; albumId?: string; journalEntryId?: string };
 
 /** Processes and stores one photo on this device. */
-export async function uploadPhoto(file: File, target: UploadTarget): Promise<ActionResult<{ photo: Photo }>> {
+export async function uploadPhoto(file: File, target: UploadTarget): Promise<ActionResult<{ photo: Photo; autoCity: CityRef | null }>> {
   if (target.cityId && !cityById(target.cityId)) return fail("City not found");
   if (target.tripId && !R.trips.has(target.tripId)) return fail("Trip not found");
   if (target.albumId && !R.albums.has(target.albumId)) return fail("Album not found");
@@ -281,6 +281,9 @@ export async function uploadPhoto(file: File, target: UploadTarget): Promise<Act
   } catch (e) {
     return fail(e instanceof ImageError ? e.message : "Couldn't process this photo");
   }
+  // No city chosen: file the photo under the nearest city from its GPS location.
+  const autoCity = !target.cityId && img.gps ? nearestCity(img.gps.lat, img.gps.lon) : null;
+  if (autoCity) target = { ...target, cityId: autoCity.id };
   const id = uid();
   const cityPositions = target.cityId ? [...R.photos.values()].filter((p) => p.cityId === target.cityId).map((p) => p.position) : [];
   const photo: Photo = {
@@ -319,7 +322,7 @@ export async function uploadPhoto(file: File, target: UploadTarget): Promise<Act
       ],
     });
     void navigator.storage?.persist?.();
-    return ok({ photo });
+    return ok({ photo, autoCity });
   });
 }
 

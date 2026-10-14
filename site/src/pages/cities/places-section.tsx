@@ -1,6 +1,6 @@
-import { ExternalLink, Heart, Link2, MapPin, Pencil, Search, Share2, Trash2 } from "lucide-react";
+import { ExternalLink, Heart, Link2, MapPin, Pencil, Share2, Trash2 } from "lucide-react";
 import { useRouter } from "@/lib/nav";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { addPlace, deletePlace, updatePlace } from "@/lib/actions";
 import { MiniMap, type MiniMarker } from "@/components/map/mini-map";
 import { useConfirm } from "@/components/ui/dialog";
@@ -12,10 +12,10 @@ import {
   mapsUrl,
   parseMapsLink,
   recommendationText,
-  searchOsm,
   shareText,
-  type FoundPlace,
 } from "@/lib/places-util";
+import { PlaceNameInput } from "@/components/place-name-input";
+import { ShareLinkButton } from "@/components/share-link-button";
 import type { Place } from "@/lib/types";
 
 type Category = keyof typeof PLACE_CATEGORY_LABEL;
@@ -52,6 +52,7 @@ export function PlacesSection({ city, places, nearby }: { city: CityInfo; places
   }, [city, places, editing, draft.lat, draft.lon, draft.name]);
 
   const nearbyMemo = useMemo(() => nearby, [nearby]);
+  const near = useMemo(() => ({ lat: city.lat, lon: city.lon, name: city.name }), [city.lat, city.lon, city.name]);
 
   const open = (p?: Place) => {
     setErrors({});
@@ -107,9 +108,12 @@ export function PlacesSection({ city, places, nearby }: { city: CityInfo; places
         <h2 id="places-h" className="text-2xl">Favorite places</h2>
         <div className="flex gap-1.5">
           {places.length > 0 && !editing && (
-            <button className="btn btn-ghost btn-sm" onClick={() => share(`My picks in ${city.name}`, places)} aria-label={`Share my picks in ${city.name}`}>
-              <Share2 size={14} /> Share
-            </button>
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={() => share(`My picks in ${city.name}`, places)} aria-label={`Share my picks in ${city.name}`}>
+                <Share2 size={14} /> Share
+              </button>
+              <ShareLinkButton cityId={city.id} title={`My picks in ${city.name}`} />
+            </>
           )}
           {!editing && <button className="btn btn-secondary btn-sm" onClick={() => open()}>Add a place</button>}
         </div>
@@ -134,17 +138,18 @@ export function PlacesSection({ city, places, nearby }: { city: CityInfo; places
             save();
           }}
         >
-          {editing === "new" && (
-            <PlaceFinder
-              city={city}
+          <div>
+            <label className="label" htmlFor="pl-name">Name</label>
+            <PlaceNameInput
+              id="pl-name"
+              value={draft.name}
+              near={near}
+              invalid={!!errors.name}
+              onChange={(name) => setDraft((d) => ({ ...d, name }))}
               onPick={(f) =>
                 setDraft((d) => ({ ...d, name: f.name, address: f.address ?? "", lat: f.lat, lon: f.lon, category: f.category as Category }))
               }
             />
-          )}
-          <div>
-            <label className="label" htmlFor="pl-name">Name</label>
-            <input id="pl-name" className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} aria-invalid={!!errors.name} />
             {errors.name && <p className="field-error">{errors.name}</p>}
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -185,7 +190,7 @@ export function PlacesSection({ city, places, nearby }: { city: CityInfo; places
                 <button type="button" className="underline" onClick={() => setDraft({ ...draft, lat: null, lon: null })}>Clear</button>
               </>
             ) : (
-              "No location yet: search above, paste a map link, or click the map."
+              "No location yet: pick a suggestion, paste a map link, or click the map."
             )}
           </p>
           {errors.form && <p className="field-error">{errors.form}</p>}
@@ -258,76 +263,6 @@ export function PlacesSection({ city, places, nearby }: { city: CityInfo; places
         </div>
       )}
     </section>
-  );
-}
-
-/** Search OpenStreetMap for the place by name, near the city. */
-function PlaceFinder({ city, onPick }: { city: CityInfo; onPick: (f: FoundPlace) => void }) {
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<FoundPlace[] | null>(null);
-  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
-  const abort = useRef<AbortController | null>(null);
-  useEffect(() => () => abort.current?.abort(), []);
-
-  const run = async () => {
-    if (q.trim().length < 3) return;
-    abort.current?.abort();
-    abort.current = new AbortController();
-    setState("loading");
-    try {
-      setResults(await searchOsm(`${q} ${city.name}`, { lat: city.lat, lon: city.lon }, abort.current.signal));
-      setState("idle");
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") setState("error");
-    }
-  };
-
-  return (
-    <div className="rounded-xl bg-fog/60 p-3">
-      <label className="label" htmlFor="pl-find">Find the place</label>
-      <div className="flex gap-2">
-        <input
-          id="pl-find"
-          className="input"
-          placeholder={`e.g. Neptune Oyster, MoMA…`}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void run();
-            }
-          }}
-          autoFocus
-        />
-        <button type="button" className="btn btn-secondary shrink-0" onClick={run} disabled={q.trim().length < 3 || state === "loading"}>
-          <Search size={14} /> {state === "loading" ? "Searching…" : "Search"}
-        </button>
-      </div>
-      {state === "error" && <p className="field-error">Place search isn&apos;t responding. Fill in the details by hand, or paste a map link.</p>}
-      {results && results.length === 0 && state === "idle" && <p className="text-sm text-ink-soft mt-2">No match. Try a shorter name, or paste a Google Maps link below.</p>}
-      {results && results.length > 0 && (
-        <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-card max-h-56 overflow-y-auto" aria-label="Search results">
-          {results.map((r, i) => (
-            <li key={`${r.lat},${r.lon},${i}`}>
-              <button
-                type="button"
-                className="w-full text-left px-3 py-2 hover:bg-fog"
-                onClick={() => {
-                  onPick(r);
-                  setResults(null);
-                  setQ("");
-                }}
-              >
-                <span className="font-medium">{r.name}</span> <span className="text-xs text-ink-faint">{r.kind}</span>
-                {r.address && <span className="block text-xs text-ink-soft">{r.address}</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="text-[11px] text-ink-faint mt-1.5">Search by OpenStreetMap.</p>
-    </div>
   );
 }
 

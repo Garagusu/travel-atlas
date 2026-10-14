@@ -17,7 +17,8 @@
     "test:e2e": "playwright test",
     "postinstall": "node scripts/copy-maplibre-worker.mjs",
     "predev": "node scripts/copy-maplibre-worker.mjs",
-    "prebuild": "node scripts/copy-maplibre-worker.mjs"
+    "prebuild": "node scripts/copy-maplibre-worker.mjs",
+    "reset-password": "tsx scripts/reset-password.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1150.0",
@@ -43,6 +44,7 @@
     "sharp": "^0.35.5",
     "topojson-client": "^3.1.0",
     "us-atlas": "^3.0.1",
+    "yauzl": "^3.4.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -57,6 +59,7 @@
     "@types/react-dom": "^19",
     "@types/topojson-client": "^3.1.5",
     "@types/topojson-specification": "^1.0.5",
+    "@types/yauzl": "^3.4.0",
     "dotenv": "^18.0.7",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",

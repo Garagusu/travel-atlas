@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 test.describe.configure({ mode: "serial" });
 
 let page: Page;
+let sharedLink = "";
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ permissions: ["clipboard-read", "clipboard-write"] });
   await page.route("https://nominatim.openstreetmap.org/**", (route) =>
@@ -20,6 +21,28 @@ test.beforeAll(async ({ browser }) => {
       ],
     }),
   );
+  // Search-as-you-type suggestions (Photon) — answered locally too
+  await page.route("https://photon.komoot.io/**", (route) =>
+    route.fulfill({
+      json: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [-71.0559294, 42.3634156] },
+            properties: { name: "Neptune Oyster", housenumber: "63", street: "Salem Street", city: "Boston", state: "Massachusetts", countrycode: "US", osm_key: "amenity", osm_value: "restaurant" },
+          },
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [-71.05, 42.36] },
+            properties: { name: "Neptune Bar", city: "Boston", state: "Massachusetts", countrycode: "US", osm_key: "amenity", osm_value: "bar" },
+          },
+        ],
+      },
+    }),
+  );
+  // The street basemap is unreachable here; the app falls back to its own shapes
+  await page.route("https://tiles.openfreemap.org/**", (route) => route.abort());
 });
 
 const go = (hash: string) => page.goto(`./#${hash}`);
@@ -97,9 +120,13 @@ test("city page: notes, validation, photos, viewer and cover", async () => {
 
 test("places, albums, trips and journal", async () => {
   await page.getByRole("button", { name: "Add a place" }).click();
-  await page.getByLabel("Find the place").fill("Neptune Oyster");
-  await page.getByRole("button", { name: "Search" }).click();
-  await page.getByRole("list", { name: "Search results" }).getByRole("button", { name: /Neptune Oyster/ }).click();
+  await page.getByRole("combobox", { name: "Name" }).pressSequentially("Neptune");
+  const suggestions = page.getByRole("listbox", { name: "Suggestions" });
+  await expect(suggestions.getByRole("option")).toHaveCount(2);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await expect(suggestions).toHaveCount(0);
   await expect(page.getByLabel("Address")).toHaveValue("63 Salem Street, Boston, Massachusetts");
   await page.getByLabel("Notes", { exact: true }).fill("Hot lobster roll.");
   await page.getByRole("button", { name: "Save place" }).click();
@@ -114,6 +141,12 @@ test("places, albums, trips and journal", async () => {
   await page.getByRole("button", { name: "Share my picks in Boston" }).click();
   await expect(page.getByText("Copied — paste it into a message")).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("• Museum of Fine Arts (Museum)");
+
+  // a link that carries the list itself opens anywhere, even with no journal on that device
+  await page.getByRole("button", { name: "Share a link: My picks in Boston" }).click();
+  await expect(page.getByText("Link copied — anyone with it can see this list")).toBeVisible();
+  sharedLink = await page.evaluate(() => navigator.clipboard.readText());
+  expect(sharedLink).toMatch(/\/travel-atlas\/#\/s\/[A-Za-z0-9_-]+$/);
 
   await page.getByRole("button", { name: "Select", exact: true }).click();
   await page.getByRole("button", { name: "Select all" }).click();
@@ -171,6 +204,35 @@ test("dashboard reflects saved records", async () => {
   await go("/dashboard");
   await expect(page.getByRole("progressbar", { name: "Share of states visited" })).toHaveAttribute("aria-valuenow", "2");
   await expect(page.getByRole("link", { name: /Burlington/ })).toBeVisible();
+});
+
+test("a shared link opens the list in a fresh browser", async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const anon = await ctx.newPage();
+  await anon.route("https://tiles.openfreemap.org/**", (route) => route.abort());
+  await anon.goto(sharedLink);
+  await expect(anon.getByRole("heading", { level: 1, name: "Boston, Massachusetts" })).toBeVisible();
+  await expect(anon.getByText("Neptune Oyster")).toBeVisible();
+  await expect(anon.getByText("Hot lobster roll.")).toBeVisible();
+  await expect(anon.getByRole("link", { name: "Open in Maps" }).first()).toHaveAttribute("href", /google\.com\/maps/);
+  await anon.goto(sharedLink.replace(/#\/s\/.*/, "#/s/broken"));
+  await expect(anon.getByRole("heading", { name: "This link can't be opened" })).toBeVisible();
+  await ctx.close();
+});
+
+test("photos with a location are filed under the nearest city", async () => {
+  await go("/albums");
+  await page.getByLabel("Add photos").setInputFiles(["tests/with-gps.jpg"]);
+  await expect(page.getByText("Filed in San Francisco, CA")).toBeVisible({ timeout: 20_000 });
+  await go("/cities/5391959"); // San Francisco's GeoNames id
+  await expect(page.getByText("1 photo")).toBeVisible();
+});
+
+test("the site can be added to the home screen", async () => {
+  const m = await (await page.request.get("manifest.webmanifest")).json();
+  expect(m.display).toBe("standalone");
+  expect(m.start_url).toBe("./");
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveCount(1);
 });
 
 test("backup downloads, and restoring it brings everything back after erasing", async () => {

@@ -6,17 +6,19 @@ import type { PhotoItem } from "@/lib/types";
 
 export type { UploadTarget };
 
-type Item = { key: string; file: File; progress: number; status: "queued" | "uploading" | "done" | "error"; error?: string };
+type Item = { key: string; file: File; progress: number; status: "queued" | "uploading" | "done" | "error"; error?: string; filedIn?: string };
 
-const ACCEPT = "image/*";
+// Listing only these types makes iPhones convert HEIC photos to JPEG before uploading.
+const ACCEPT = "image/jpeg,image/png,image/webp,image/gif";
 const MAX_MB = 25;
 
-async function uploadOne(file: File, target: UploadTarget, onProgress: (p: number) => void): Promise<PhotoItem> {
+async function uploadOne(file: File, target: UploadTarget, onProgress: (p: number) => void): Promise<{ photo: PhotoItem; filedIn?: string }> {
   onProgress(0.3);
   const res = await uploadPhoto(file, target);
   if (!res.ok) throw new Error(res.error);
   onProgress(1);
-  return withCity(res.data.photo);
+  const c = res.data.autoCity;
+  return { photo: withCity(res.data.photo), filedIn: c ? `${c.name}, ${c.state}` : undefined };
 }
 
 /** Drag-and-drop / file-picker uploader with per-file progress and errors. */
@@ -58,8 +60,8 @@ export function Uploader({
           const item = it;
           update(item.key, { status: "uploading" });
           try {
-            const photo = await uploadOne(item.file, target, (p) => update(item.key, { progress: p }));
-            update(item.key, { status: "done", progress: 1 });
+            const { photo, filedIn } = await uploadOne(item.file, target, (p) => update(item.key, { progress: p }));
+            update(item.key, { status: "done", progress: 1, filedIn });
             onUploaded?.(photo);
             ok++;
           } catch (e) {
@@ -69,7 +71,7 @@ export function Uploader({
       };
       await Promise.all([worker(), worker()]);
       if (ok) {
-        setTimeout(() => setItems((list) => list.filter((i) => i.status !== "done")), 1500);
+        setTimeout(() => setItems((list) => list.filter((i) => i.status !== "done" || i.filedIn)), 1500);
       }
     },
     [target, onUploaded],
@@ -101,7 +103,7 @@ export function Uploader({
           <button type="button" className="text-pine font-semibold underline underline-offset-2" onClick={() => input.current?.click()}>
             {compact ? "browse" : "choose from your computer"}
           </button>
-          {!compact && <span className="block text-xs text-ink-faint mt-1">JPEG, PNG, WebP or GIF, up to {MAX_MB} MB each. Saved on this device.</span>}
+          {!compact && <span className="block text-xs text-ink-faint mt-1">JPEG, PNG, WebP or GIF (iPhone photos are converted automatically), up to {MAX_MB} MB each. Photos with a location are filed under the nearest city. Saved on this device.</span>}
         </p>
         <input
           ref={input}
@@ -126,7 +128,7 @@ export function Uploader({
               {i.status === "error" ? (
                 <span className="text-danger text-xs shrink-0 max-w-[60%] text-right">{i.error}</span>
               ) : i.status === "done" ? (
-                <span className="text-pine text-xs shrink-0">Uploaded</span>
+                <span className="text-pine text-xs shrink-0">{i.filedIn ? `Filed in ${i.filedIn}` : "Uploaded"}</span>
               ) : (
                 <span className="w-28 h-1.5 rounded-full bg-fog overflow-hidden shrink-0" role="progressbar" aria-valuenow={Math.round(i.progress * 100)} aria-valuemin={0} aria-valuemax={100}>
                   <span className="block h-full bg-pine transition-[width]" style={{ width: `${Math.max(4, i.progress * 100)}%` }} />

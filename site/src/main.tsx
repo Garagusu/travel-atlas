@@ -17,6 +17,7 @@ import { EntryPage } from "./pages/journal/entry-page";
 import { JournalPage } from "./pages/journal/journal-page";
 import { NotFound } from "./pages/not-found";
 import { PlacesPage } from "./pages/places-page";
+import { SharedPage } from "./pages/shared-page";
 import { SettingsPage } from "./pages/settings-page";
 import { StatePage } from "./pages/states/state-page";
 import { TripPage } from "./pages/trips/trip-page";
@@ -43,6 +44,15 @@ function App() {
       (e) => setState({ error: (e as Error).message }),
     );
   }, []);
+  // Shared links open a standalone read-only page; they don't need the journal's storage.
+  if (window.location.hash.startsWith("#/s/"))
+    return (
+      <HashRouter>
+        <Routes>
+          <Route path="/s/:data" element={<SharedPage />} />
+        </Routes>
+      </HashRouter>
+    );
   if (state === "loading")
     return (
       <div className="flex-1 flex items-center justify-center py-24" role="status" aria-label="Loading">

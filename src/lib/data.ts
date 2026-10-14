@@ -10,10 +10,12 @@ import {
   journalPhotos,
   photos,
   places,
+  shareLinks,
   stateLogs,
   states,
   tripStops,
   trips,
+  users,
   type VisitStatus,
 } from "@/db/schema";
 import { TOTAL_STATES } from "./geo/states-meta";
@@ -718,4 +720,94 @@ export async function listAllPlaces(userId: string, f: { category?: string; stat
     .innerJoin(cities, eq(cities.id, places.cityId))
     .where(and(...where))
     .orderBy(asc(cities.stateCode), asc(cities.name), desc(places.favorite), asc(places.name));
+}
+
+/* ------------------------------------------------------------------ */
+/* Share links                                                         */
+/* ------------------------------------------------------------------ */
+
+export async function listShareLinks(userId: string) {
+  return db
+    .select({ id: shareLinks.id, cityId: shareLinks.cityId, cityName: cities.name, stateCode: cities.stateCode, createdAt: shareLinks.createdAt })
+    .from(shareLinks)
+    .leftJoin(cities, eq(cities.id, shareLinks.cityId))
+    .where(and(eq(shareLinks.userId, userId), isNull(shareLinks.revokedAt)))
+    .orderBy(desc(shareLinks.createdAt));
+}
+
+/** Everything a public share page shows. Only places, notes and one cover photo — nothing else. */
+export async function getSharedList(token: string) {
+  if (!/^[A-Za-z0-9_-]{8,40}$/.test(token)) return null;
+  const [link] = await db
+    .select({ link: shareLinks, ownerName: users.name })
+    .from(shareLinks)
+    .innerJoin(users, eq(users.id, shareLinks.userId))
+    .where(eq(shareLinks.id, token))
+    .limit(1);
+  if (!link || link.link.revokedAt) return null;
+  const { userId, cityId } = link.link;
+  const list = await listAllPlaces(userId);
+  const chosen = cityId ? list.filter((p) => p.cityId === cityId) : list;
+  let city = null;
+  let coverId: string | null = null;
+  if (cityId) {
+    const c = await getCity(userId, cityId);
+    if (c) {
+      city = { id: c.city.id, name: c.city.name, stateCode: c.city.stateCode, stateName: c.stateName, lat: c.city.lat, lon: c.city.lon, impression: c.log?.impression ?? null, rating: c.log?.rating ?? null };
+      coverId = c.cover;
+    }
+  }
+  return {
+    token,
+    ownerFirstName: link.ownerName.split(" ")[0],
+    city,
+    coverId,
+    places: chosen.map((p) => ({
+      id: p.id,
+      name: p.name,
+      category: p.category,
+      address: p.address,
+      notes: p.notes,
+      url: p.url,
+      lat: p.lat,
+      lon: p.lon,
+      favorite: p.favorite,
+      cityId: p.cityId,
+      cityName: p.cityName,
+      stateCode: p.stateCode,
+    })),
+  };
+}
+
+/**
+ * The closest city to a point (within maxKm), for filing photos by their GPS
+ * location. Includes the user's own custom cities.
+ */
+export async function nearestCity(userId: string, lat: number, lon: number, maxKm = 25) {
+  const dLat = maxKm / 111;
+  const dLon = maxKm / (111 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+  const rows = await db
+    .select({ id: cities.id, name: cities.name, stateCode: cities.stateCode, lat: cities.lat, lon: cities.lon, population: cities.population })
+    .from(cities)
+    .where(
+      and(
+        or(isNull(cities.createdBy), eq(cities.createdBy, userId)),
+        sql`${cities.lat} between ${lat - dLat} and ${lat + dLat}`,
+        sql`${cities.lon} between ${lon - dLon} and ${lon + dLon}`,
+      ),
+    )
+    .limit(500);
+  let best: (typeof rows)[number] | null = null;
+  let bestKm = Infinity;
+  for (const c of rows) {
+    const km = haversineKm(lat, lon, c.lat, c.lon);
+    if (km < bestKm) [best, bestKm] = [c, km];
+  }
+  return best && bestKm <= maxKm ? { id: best.id, name: best.name, stateCode: best.stateCode } : null;
+}
+
+function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number) {
+  const r = Math.PI / 180;
+  const h = Math.sin(((bLat - aLat) * r) / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(((bLon - aLon) * r) / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
 }

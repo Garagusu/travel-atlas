@@ -7,6 +7,10 @@ A browser-only build of Travel Atlas that runs on GitHub Pages (no server, no da
   Another device or browser starts with an empty journal.
 - **Back up regularly**: *Backup* in the top bar downloads one ZIP with all data and photos.
   The same page restores a backup, which is also how you move the journal to another device.
+- Saved places with suggestions as you type, a street basemap (OpenFreeMap), and photos filed by GPS location — as in the full app.
+- **Share links** carry the list inside the link itself (compressed), so they work without a server. Anyone with the link can see that list; it can't be turned off, so share a new link if the list changes.
+- The backup ZIP can be restored into the full app (Settings → Restore from a backup) to move to the server version.
+- Add it to an iPhone home screen: Safari → Share → *Add to Home Screen*.
 - City list: GeoNames places with population ≥ 1,000 (CC BY 4.0); boundaries: US Census Bureau via us-atlas.
 
 ## Publish

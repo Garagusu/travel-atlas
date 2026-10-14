@@ -7,7 +7,11 @@ A private travel journal for the United States. Open it and the first thing you 
 - **Photos**: uploads are validated, auto-rotated, stripped of GPS metadata and stored with WebP thumbnail (≤640px) and display (≤2048px) variants plus the original. Grid view, full-size viewer with keyboard/swipe, captions/dates/descriptions (EXIF capture date is read automatically), covers, drag-to-reorder, bulk select, albums (a photo can be in several albums without being copied), paged library.
 - **Trips**: start/end dates, ordered itinerary with a route map, photos, notes, journal timeline. A city can be in many trips; the city record and its album are shared, never duplicated.
 - **Journal**: entries with title, date, city, trip, multi-paragraph story, highlights, places visited, tags and attached photos; full-text-ish search and tag filters.
-- **Overview, wishlist, settings**: progress dashboard, wishlist grouped by state, JSON export and a full ZIP backup with original photos.
+- **Places**: save restaurants, museums, cafés, parks and more on any city. Type a name or address and suggestions appear as you type (like Google Maps); pick one and the address, kind and pin fill in. You can also paste a Google Maps link. Places show on the main map, on a Places page, and open in Google Maps with one tap.
+- **Sharing**: share a city's picks (or all favourites) as text, or as a read-only public link that works without an account. Links can be turned off any time in Settings.
+- **Photos find their city**: a photo uploaded without a city (e.g. on the Albums page) is filed under the nearest city, within 25 km, using its GPS location.
+- **Overview, wishlist, settings**: progress dashboard, wishlist grouped by state, JSON export, a full ZIP backup with original photos, restore from a backup (also from the GitHub Pages edition), and password change.
+- **On a phone**: add it to the home screen (Safari → Share → *Add to Home Screen*) and it opens full-screen like an app.
 - **Private by default**: password accounts with server-side sessions. Every query is scoped to the signed-in user, and photos are only ever served through an authenticated route.
 
 ## Two editions
@@ -105,7 +109,7 @@ See `.env.example` for the full annotated list.
 | `MAX_UPLOAD_MB` | no | default 25 |
 | `ALLOW_SIGNUP` | no | default `false` once an owner exists |
 | `SECURE_COOKIES` | no | default `true` in production |
-| `NEXT_PUBLIC_MAP_STYLE_URL` | no | optional basemap, baked in at build time; see below |
+| `NEXT_PUBLIC_MAP_STYLE_URL` | no | street basemap, baked in at build time. Default OpenFreeMap; `none` turns it off. See below |
 
 ## Photo storage
 
@@ -135,19 +139,31 @@ If the S3 settings are incomplete, uploads fail with a message naming the missin
 - Cities: [GeoNames](https://www.geonames.org/) places with population ≥ 1,000 via [`all-the-cities`](https://github.com/zeke/all-the-cities) (neighbourhoods and abandoned places filtered out), loaded into the `cities` table by `npm run db:seed`. Smaller towns can be added from any state page by pinning them on a map.
 - Map colours always come from the database: states are filled when you have a visited (or wishlisted) city in them; city dots are coloured by your saved status.
 
-The default map style is self-contained: it draws the state shapes, city dots and labels with no tile server or API key. For streets and place names on top (useful on city pages for saved places), set a MapLibre style URL before building, for example:
+The map shows real streets and place names underneath your states and cities, from [OpenFreeMap](https://openfreemap.org) (free, no key). To use a different MapLibre style, set it before building:
 
 ```
-NEXT_PUBLIC_MAP_STYLE_URL=https://tiles.openfreemap.org/styles/positron        # OpenFreeMap, no key
+NEXT_PUBLIC_MAP_STYLE_URL=https://tiles.openfreemap.org/styles/liberty          # more colourful OpenFreeMap style
 NEXT_PUBLIC_MAP_STYLE_URL=https://api.maptiler.com/maps/dataviz-light/style.json?key=YOUR_KEY   # MapTiler
+NEXT_PUBLIC_MAP_STYLE_URL=none                                                  # no street map
 ```
-If the style can't be loaded, the map falls back to the built-in style.
+If the street map can't be loaded, the map quietly falls back to the built-in shapes.
+
+Place suggestions while typing come from [Photon](https://photon.komoot.io) (OpenStreetMap data, no key); pressing Enter when suggestions are unavailable searches [Nominatim](https://nominatim.openstreetmap.org). Both are called from the browser.
 
 ## Backups and export
 
 - **In the app**: Settings → *Download ZIP* (all data as `data.json` plus every original photo) or *Download JSON* (data only).
 - **Server level**: `pg_dump "$DATABASE_URL" > travel-journal.sql` for the database, plus a copy of `STORAGE_DIR` (or your bucket, e.g. `aws s3 sync`/`rclone`).
-- Restore: `psql "$DATABASE_URL" < travel-journal.sql` and put the photo files back at the same paths.
+- **Restore in the app**: Settings → *Restore from a backup* → choose a ZIP. This replaces the account's current data. ZIPs from the GitHub Pages edition (Settings → Download ZIP there) work too, which is how you move a browser-only journal to the server.
+- Restore at server level: `psql "$DATABASE_URL" < travel-journal.sql` and put the photo files back at the same paths.
+
+## Passwords
+
+Change it in Settings → Password (other devices are signed out). If you forget it, run this where the app can reach the database (on Railway: the app service → *⋯* → *Shell*, or `railway run` locally):
+
+```bash
+npm run reset-password -- you@example.com "a new password of 10+ characters"
+```
 
 ## Tests
 
@@ -160,7 +176,8 @@ npm run build && npm run test:e2e
                          # Playwright against the production build on port 3100, using the test database:
                          # sign-up/login, map search and marking, state and city pages, uploads and
                          # validation errors, photo viewer and covers, places, albums, trips, journal,
-                         # dashboard, export/ZIP, cross-account privacy, persistence across sign-in.
+                         # dashboard, export/ZIP, cross-account privacy, persistence across sign-in,
+                         # type-ahead place search, share links, GPS filing, restore, password change, PWA.
 E2E_DEV=1 npm run test:e2e   # same tests against `next dev` (no build needed)
 ```
 Install Playwright's browser once with `npx playwright install chromium`.
@@ -180,8 +197,9 @@ This runs Postgres and the app with named volumes for the database and photos; m
 
 ## Notes and limitations
 
-- HEIC photos straight from an iPhone can't be decoded by the bundled image library; the uploader says so and suggests switching the camera to “Most Compatible” or exporting as JPEG.
+- iPhone photos: the photo picker converts HEIC to JPEG automatically because the uploader only asks for JPEG/PNG/WebP/GIF. A HEIC file dragged in from a computer still can't be decoded; the uploader says so.
+- Location filing reads GPS from the upload. The thumbnail and display copies contain no GPS metadata; the original file is kept exactly as uploaded and is only ever served to you.
 - The S3 driver uses the standard AWS SDK commands and is covered by configuration tests, but it was not exercised against a live bucket while building this; the local driver is what the automated tests use. Try a test upload after configuring it.
-- The optional external basemap was not reachable from the build environment, so only the built-in map style has been visually verified.
+- OpenFreeMap tiles, Photon and Nominatim were not reachable from the build environment. The OpenFreeMap style URL and Photon's API were checked against their documentation, and the tests use recorded responses; the fallback when they're unreachable is tested.
 - Journal stories are plain multi-paragraph text (blank line = new paragraph) rather than a rich-text editor.
 - If `next dev` keeps reloading after you ran `next build`, delete the `.next` folder and start it again.

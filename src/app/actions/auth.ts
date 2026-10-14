@@ -1,15 +1,18 @@
 "use server";
 
-import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
+import { and, eq, ne } from "drizzle-orm";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { sessions, users } from "@/db/schema";
 import {
   clearThrottle,
   createSession,
   destroySession,
   dummyHash,
+  getCurrentUser,
+  hashToken,
+  SESSION_COOKIE,
   hashPassword,
   signupAllowed,
   throttleLogin,
@@ -57,4 +60,27 @@ export async function login(_prev: AuthState, form: FormData): Promise<AuthState
 export async function logout() {
   await destroySession();
   redirect("/login");
+}
+
+export type PasswordState = { ok?: boolean; error?: string; fieldErrors?: FieldErrors } | undefined;
+
+/** Change the password; every other signed-in device is signed out. */
+export async function changePassword(_prev: PasswordState, form: FormData): Promise<PasswordState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Sign in again to change your password." };
+  const current = String(form.get("current") ?? "");
+  const next = String(form.get("next") ?? "");
+  const confirm = String(form.get("confirm") ?? "");
+  const fe: FieldErrors = {};
+  if (!current) fe.current = "Enter your current password";
+  if (next.length < 10) fe.next = "Use at least 10 characters";
+  if (next.length > 200) fe.next = "That password is too long";
+  if (next !== confirm) fe.confirm = "The new passwords don't match";
+  if (Object.keys(fe).length) return { fieldErrors: fe };
+  const [row] = await db.select({ hash: users.passwordHash }).from(users).where(eq(users.id, user.id)).limit(1);
+  if (!row || !(await verifyPassword(current, row.hash))) return { fieldErrors: { current: "That isn't your current password" } };
+  await db.update(users).set({ passwordHash: await hashPassword(next) }).where(eq(users.id, user.id));
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  await db.delete(sessions).where(and(eq(sessions.userId, user.id), token ? ne(sessions.id, hashToken(token)) : undefined));
+  return { ok: true };
 }

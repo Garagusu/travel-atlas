@@ -19,5 +19,9 @@ export function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|geo/|maplibre/).*)"],
+  // Upload routes are excluded: Next buffers request bodies that pass through the
+  // proxy (10 MB cap), and these routes authenticate every request themselves.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|geo/|maplibre/|manifest.webmanifest|icon|apple-icon|icon-192.png|icon-512.png|api/photos|api/import|s/).*)",
+  ],
 };

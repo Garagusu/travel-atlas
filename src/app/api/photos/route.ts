@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { albumPhotos, albums, cities, journalEntries, journalPhotos, photos, trips } from "@/db/schema";
 import { apiUser, jsonError, sameOrigin } from "@/lib/api";
-import { listPhotosPage } from "@/lib/data";
+import { listPhotosPage, nearestCity } from "@/lib/data";
 import { ImageError, processImage, variantKey } from "@/lib/images";
 import { storage, StorageConfigError } from "@/lib/storage";
 
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     const v = form.get(k);
     return typeof v === "string" && v.trim() ? v.trim() : null;
   };
-  const cityId = str("cityId") ? Number(str("cityId")) : null;
+  let cityId = str("cityId") ? Number(str("cityId")) : null;
   const tripId = str("tripId");
   const albumId = str("albumId");
   const entryId = str("journalEntryId");
@@ -87,6 +87,13 @@ export async function POST(req: Request) {
     if (err instanceof ImageError) return jsonError(422, err.message);
     console.error("image processing failed", err);
     return jsonError(500, "Couldn't process this photo");
+  }
+
+  // No city chosen: file the photo under the nearest city from its GPS location.
+  let autoCity: { id: number; name: string; stateCode: string } | null = null;
+  if (!cityId && processed.gps) {
+    autoCity = await nearestCity(user.id, processed.gps.lat, processed.gps.lon).catch(() => null);
+    if (autoCity) cityId = autoCity.id;
   }
 
   const photoId = randomUUID();
@@ -169,6 +176,7 @@ export async function POST(req: Request) {
           tripId: row.tripId,
           createdAt: row.createdAt,
         },
+        autoCity,
       },
       { status: 201 },
     );

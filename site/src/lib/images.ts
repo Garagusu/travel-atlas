@@ -7,6 +7,7 @@ export type ProcessedImage = {
   height: number;
   dominantColor: string;
   takenOn: string | null;
+  gps: { lat: number; lon: number } | null;
   thumb: Blob;
   display: Blob;
 };
@@ -69,7 +70,15 @@ export async function processImage(file: File): Promise<ProcessedImage> {
     } catch {
       /* no EXIF */
     }
-    return { width: bitmap.width, height: bitmap.height, dominantColor: `#${hex(r)}${hex(g)}${hex(b)}`, takenOn, thumb, display };
+    let gps: { lat: number; lon: number } | null = null;
+    try {
+      const g = await exifr.gps(file);
+      if (g && Number.isFinite(g.latitude) && Number.isFinite(g.longitude) && !(g.latitude === 0 && g.longitude === 0))
+        gps = { lat: g.latitude, lon: g.longitude };
+    } catch {
+      /* no GPS */
+    }
+    return { width: bitmap.width, height: bitmap.height, dominantColor: `#${hex(r)}${hex(g)}${hex(b)}`, takenOn, gps, thumb, display };
   } finally {
     bitmap.close();
   }

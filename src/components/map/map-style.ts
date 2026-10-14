@@ -25,4 +25,20 @@ export function atlasStyle(): StyleSpecification {
   };
 }
 
-export const basemapStyleUrl = () => process.env.NEXT_PUBLIC_MAP_STYLE_URL?.trim() || null;
+/**
+ * Street basemap. OpenFreeMap is free and needs no key; set the env variable to
+ * another MapLibre style URL to change it, or to "none" for the plain atlas style.
+ * If the basemap can't be loaded, maps fall back to the atlas style for the session.
+ */
+export const DEFAULT_BASEMAP = "https://tiles.openfreemap.org/styles/positron";
+const configured = () => process.env.NEXT_PUBLIC_MAP_STYLE_URL?.trim();
+let basemapFailed = false;
+export const markBasemapFailed = () => {
+  basemapFailed = true;
+};
+export const basemapStyleUrl = () => {
+  if (basemapFailed) return null;
+  const v = configured();
+  if (v === "none") return null;
+  return v || DEFAULT_BASEMAP;
+};

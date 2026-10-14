@@ -7,12 +7,15 @@ import type { PhotoItem } from "@/lib/data";
 
 export type UploadTarget = { cityId?: number; tripId?: string; albumId?: string; journalEntryId?: string };
 
-type Item = { key: string; file: File; progress: number; status: "queued" | "uploading" | "done" | "error"; error?: string };
+type Item = { key: string; file: File; progress: number; status: "queued" | "uploading" | "done" | "error"; error?: string; filedIn?: string };
 
-const ACCEPT = "image/jpeg,image/png,image/webp,image/avif,image/gif,image/heic,image/heif";
+// Listing only these types makes iPhones convert HEIC photos to JPEG before uploading.
+const ACCEPT = "image/jpeg,image/png,image/webp,image/gif";
 const MAX_MB = 25;
 
-function uploadOne(file: File, target: UploadTarget, onProgress: (p: number) => void): Promise<PhotoItem> {
+type AutoCity = { id: number; name: string; stateCode: string } | null;
+
+function uploadOne(file: File, target: UploadTarget, onProgress: (p: number) => void): Promise<{ photo: PhotoItem; autoCity: AutoCity }> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     form.append("file", file);
@@ -21,13 +24,13 @@ function uploadOne(file: File, target: UploadTarget, onProgress: (p: number) => 
     xhr.open("POST", "/api/photos");
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     xhr.onload = () => {
-      let body: { photo?: PhotoItem; error?: string } = {};
+      let body: { photo?: PhotoItem; autoCity?: AutoCity; error?: string } = {};
       try {
         body = JSON.parse(xhr.responseText);
       } catch {
         /* non-JSON error page */
       }
-      if (xhr.status >= 200 && xhr.status < 300 && body.photo) resolve(body.photo);
+      if (xhr.status >= 200 && xhr.status < 300 && body.photo) resolve({ photo: body.photo, autoCity: body.autoCity ?? null });
       else reject(new Error(body.error ?? `Upload failed (${xhr.status})`));
     };
     xhr.onerror = () => reject(new Error("Network error — check your connection and try again"));
@@ -75,8 +78,8 @@ export function Uploader({
           const item = it;
           update(item.key, { status: "uploading" });
           try {
-            const photo = await uploadOne(item.file, target, (p) => update(item.key, { progress: p }));
-            update(item.key, { status: "done", progress: 1 });
+            const { photo, autoCity } = await uploadOne(item.file, target, (p) => update(item.key, { progress: p }));
+            update(item.key, { status: "done", progress: 1, filedIn: autoCity ? `${autoCity.name}, ${autoCity.stateCode}` : undefined });
             onUploaded?.(photo);
             ok++;
           } catch (e) {
@@ -87,7 +90,7 @@ export function Uploader({
       await Promise.all([worker(), worker(), worker()]);
       if (ok) {
         router.refresh();
-        setTimeout(() => setItems((list) => list.filter((i) => i.status !== "done")), 1500);
+        setTimeout(() => setItems((list) => list.filter((i) => i.status !== "done" || i.filedIn)), 1500);
       }
     },
     [target, onUploaded, router],
@@ -119,7 +122,7 @@ export function Uploader({
           <button type="button" className="text-pine font-semibold underline underline-offset-2" onClick={() => input.current?.click()}>
             {compact ? "browse" : "choose from your computer"}
           </button>
-          {!compact && <span className="block text-xs text-ink-faint mt-1">JPEG, PNG, WebP, AVIF or GIF, up to {MAX_MB} MB each</span>}
+          {!compact && <span className="block text-xs text-ink-faint mt-1">JPEG, PNG, WebP or GIF (iPhone photos are converted automatically), up to {MAX_MB} MB each. Photos with a location are filed under the nearest city.</span>}
         </p>
         <input
           ref={input}
@@ -144,7 +147,7 @@ export function Uploader({
               {i.status === "error" ? (
                 <span className="text-danger text-xs shrink-0 max-w-[60%] text-right">{i.error}</span>
               ) : i.status === "done" ? (
-                <span className="text-pine text-xs shrink-0">Uploaded</span>
+                <span className="text-pine text-xs shrink-0">{i.filedIn ? `Filed in ${i.filedIn}` : "Uploaded"}</span>
               ) : (
                 <span className="w-28 h-1.5 rounded-full bg-fog overflow-hidden shrink-0" role="progressbar" aria-valuenow={Math.round(i.progress * 100)} aria-valuemin={0} aria-valuemax={100}>
                   <span className="block h-full bg-pine transition-[width]" style={{ width: `${Math.max(4, i.progress * 100)}%` }} />
