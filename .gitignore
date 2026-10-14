@@ -1,7 +1,7 @@
 node_modules
 .next
 .env
-storage/
+/storage/
 test-results/
 playwright-report/
 *.tsbuildinfo
