@@ -4,7 +4,8 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { REGION_VIEWS, STATE_BY_CODE } from "@/lib/states-meta";
 import { atlasStyle, basemapStyleUrl, MAP_COLORS, markBasemapFailed } from "./map-style";
 import { CATEGORY_COLORS } from "@/lib/places-util";
-import type { BaseCities, CityPick, MapPlace, MyCity, StateStatus, StatesGeo, StatusCode, StatusFilter } from "./types";
+import { getBlob } from "@/lib/store";
+import type { BaseCities, CityPick, MapPhoto, MapPlace, MyCity, StateStatus, StatesGeo, StatusCode, StatusFilter } from "./types";
 
 // MapLibre's worker can't be resolved from inside the bundle; it is copied to /public on install.
 if (typeof window !== "undefined") maplibregl.setWorkerUrl(new URL("maplibre/maplibre-gl-worker.mjs", document.baseURI).href);
@@ -28,6 +29,8 @@ type Props = {
   onStateClick?: (code: string) => void;
   onPlaceClick?: (p: MapPlace) => void;
   places?: MapPlace[];
+  photos?: MapPhoto[];
+  onPhotoClick?: (id: string) => void;
   onReady?: () => void;
   className?: string;
 };
@@ -42,7 +45,18 @@ const CITY_LAYERS_BASE = [
 const MINE_LAYERS = ["mine-none", "mine-want", "mine-visited"];
 const INTERACTIVE_CITY_LAYERS = [...MINE_LAYERS, ...CITY_LAYERS_BASE.map((l) => l.id)].reverse();
 
-type Hover = { x: number; y: number; title: string; sub?: string } | null;
+type Hover = { x: number; y: number; title: string; sub?: string; img?: string; photoId?: string } | null;
+
+/* thumbnails live in IndexedDB; keep one object URL per photo for the hover card */
+const thumbUrls = new Map<string, Promise<string | undefined>>();
+const thumbUrl = (id: string) => {
+  let p = thumbUrls.get(id);
+  if (!p) {
+    p = getBlob(id, "thumb").then((b) => (b ? URL.createObjectURL(b) : undefined)).catch(() => undefined);
+    thumbUrls.set(id, p);
+  }
+  return p;
+};
 
 function boundsFor(code: string, geo: StatesGeo): LngLatBoundsLike | null {
   if (code === "AK") return REGION_VIEWS.alaska.bounds as LngLatBoundsLike;
@@ -63,7 +77,7 @@ function boundsFor(code: string, geo: StatesGeo): LngLatBoundsLike | null {
 }
 
 export const USMap = forwardRef<USMapHandle, Props>(function USMap(
-  { statesGeo, baseCities, mine, stateStatus, filter, selectedState, compact, onCityClick, onStateClick, onPlaceClick, places, onReady, className },
+  { statesGeo, baseCities, mine, stateStatus, filter, selectedState, compact, onCityClick, onStateClick, onPlaceClick, places, photos, onPhotoClick, onReady, className },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null);
@@ -71,11 +85,12 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
   const [loaded, setLoaded] = useState(false);
   const [hover, setHover] = useState<Hover>(null);
   const [styleError, setStyleError] = useState(false);
-  const callbacks = useRef({ onCityClick, onStateClick, onPlaceClick });
+  const callbacks = useRef({ onCityClick, onStateClick, onPlaceClick, onPhotoClick });
   useEffect(() => {
-    callbacks.current = { onCityClick, onStateClick, onPlaceClick };
+    callbacks.current = { onCityClick, onStateClick, onPlaceClick, onPhotoClick };
   });
   const placesById = useRef(new Map<string, MapPlace>());
+  const photosById = useRef(new Map<string, MapPhoto>());
   const usingBasemap = !!basemapStyleUrl() && !styleError;
 
   const fipsByCode = useMemo(() => new Map(statesGeo.features.map((f) => [f.properties.code, Number(f.properties.fips)])), [statesGeo]);
@@ -231,6 +246,22 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
         },
       });
 
+      // where photos were taken
+      map.addSource("photos", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: "photos",
+        type: "circle",
+        source: "photos",
+        // only from city scale up, so country-level clicks still reach the city dots
+        minzoom: 7.5,
+        paint: {
+          "circle-color": MAP_COLORS.photo,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 7.5, 3.5, 13, 6.5],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.6,
+        },
+      });
+
       /* ---------- interaction ---------- */
       let hoveredState: number | null = null;
       const setStateHover = (id: number | null) => {
@@ -251,7 +282,28 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
         return map.queryRenderedFeatures([[p.x - 6, p.y - 6], [p.x + 6, p.y + 6]], { layers: ["places"] })[0];
       };
 
+      const photoAt = (pt: maplibregl.PointLike) => {
+        if (!map.getLayer("photos") || map.getLayoutProperty("photos", "visibility") === "none") return undefined;
+        const p = maplibregl.Point.convert(pt);
+        return map.queryRenderedFeatures([[p.x - 6, p.y - 6], [p.x + 6, p.y + 6]], { layers: ["photos"] })[0];
+      };
+
       map.on("mousemove", (e: MapMouseEvent) => {
+        const photo = photoAt(e.point);
+        if (photo) {
+          setStateHover(null);
+          map.getCanvas().style.cursor = "pointer";
+          const ph = photosById.current.get(String(photo.properties.id));
+          setHover({
+            x: e.point.x,
+            y: e.point.y,
+            title: ph?.caption || [ph?.cityName, ph?.stateCode].filter(Boolean).join(", ") || "Photo",
+            sub: ph?.takenOn ?? undefined,
+            photoId: ph?.id,
+          });
+          if (ph) void thumbUrl(ph.id).then((img) => img && setHover((h) => (h?.photoId === ph.id ? { ...h, img } : h)));
+          return;
+        }
         const place = placeAt(e.point);
         if (place) {
           setStateHover(null);
@@ -291,6 +343,11 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
       map.on("movestart", () => setHover(null));
 
       map.on("click", (e: MapMouseEvent) => {
+        const photo = photoAt(e.point);
+        if (photo) {
+          callbacks.current.onPhotoClick?.(String(photo.properties.id));
+          return;
+        }
         const place = placeAt(e.point);
         if (place) {
           const pl = placesById.current.get(String(place.properties.id));
@@ -364,6 +421,21 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
     });
   }, [loaded, places]);
 
+  /* ---------------- photo locations ---------------- */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!loaded || !map) return;
+    photosById.current = new Map((photos ?? []).map((p) => [p.id, p]));
+    (map.getSource("photos") as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: (photos ?? []).map((p) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [p.lon, p.lat] },
+        properties: { id: p.id },
+      })),
+    });
+  }, [loaded, photos]);
+
   /* ---------------- state colours + filters ---------------- */
   useEffect(() => {
     const map = mapRef.current;
@@ -382,6 +454,7 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
     map.setLayoutProperty("mine-want", "visibility", vis(filter.want));
     map.setLayoutProperty("mine-visited", "visibility", vis(filter.visited));
     map.setLayoutProperty("places", "visibility", vis(filter.places !== false));
+    map.setLayoutProperty("photos", "visibility", vis(filter.photos !== false));
   }, [loaded, stateStatus, filter, fipsByCode]);
 
   /* ---------------- selected state outline ---------------- */
@@ -481,6 +554,10 @@ export const USMap = forwardRef<USMapHandle, Props>(function USMap(
           className="pointer-events-none absolute z-10 rounded-lg bg-ink text-white text-xs px-2.5 py-1.5 shadow-[var(--shadow-lift)] whitespace-nowrap"
           style={{ left: hover.x + 12, top: hover.y + 12 }}
         >
+          {hover.img && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={hover.img} alt="" className="block w-36 h-24 object-cover rounded mb-1.5 bg-white/10" />
+          )}
           <span className="font-medium">{hover.title}</span>
           {hover.sub && <span className="opacity-75"> {hover.sub}</span>}
         </div>

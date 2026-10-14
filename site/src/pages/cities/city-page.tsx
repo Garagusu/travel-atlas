@@ -33,6 +33,7 @@ export function CityPage() {
       log: R.cityLogs.get(cityId) ?? null,
       cover: cityCover(cityId),
       photos: cityPhotos(cityId),
+      photoSpots: cityPhotos(cityId).flatMap((p) => (p.lat != null && p.lon != null ? [{ id: p.id, lat: p.lat, lon: p.lon }] : [])),
       places: cityPlaces(cityId),
       entries: journalForCity(cityId),
       trips: tripsForCity(cityId),
@@ -42,7 +43,7 @@ export function CityPage() {
     };
   }, [cityId]);
   if (!d) return <NotFound />;
-  const { city, log, cover, photos, places, entries, trips, albums, tripOptions, nearby } = d;
+  const { city, log, cover, photos, photoSpots, places, entries, trips, albums, tripOptions, nearby } = d;
   const status = log?.status ?? "not_visited";
 
   return (
@@ -123,7 +124,12 @@ export function CityPage() {
           </div>
 
           <aside className="space-y-10 min-w-0">
-            <PlacesSection city={{ id: city.id, name: city.name, lat: city.lat, lon: city.lon, stateCode: city.state, status }} places={places} nearby={nearby} />
+            <PlacesSection
+              city={{ id: city.id, name: city.name, lat: city.lat, lon: city.lon, stateCode: city.state, status }}
+              places={places}
+              nearby={nearby}
+              photoSpots={photoSpots}
+            />
             <section aria-labelledby="trips-h">
               <h2 id="trips-h" className="text-2xl mb-3">Trips</h2>
               {trips.length === 0 ? (

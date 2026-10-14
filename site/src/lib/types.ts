@@ -75,6 +75,11 @@ export type Photo = {
   height: number;
   dominantColor: string | null;
   takenOn: string | null;
+  /** where it was taken; missing on photos saved before locations were kept */
+  lat?: number | null;
+  lon?: number | null;
+  /** false/missing: the original hasn't been read for GPS yet */
+  gpsChecked?: boolean;
   caption: string | null;
   description: string | null;
   position: number;

@@ -3,7 +3,8 @@ import { fail, ok, type ActionResult } from "./action-result";
 import { ImageError, processImage } from "./images";
 import { isValidStateCode } from "./states-meta";
 import type { StoreName } from "./db";
-import { blobKey, cityById, mutate, nearestCity, now, R, uid } from "./store";
+import exifr from "exifr";
+import { blobKey, cityById, getBlob, mutate, nearestCity, now, R, uid } from "./store";
 import type { Album, CityLog, CityRef, JournalEntry, Photo, Place, Trip, TripStop, VisitStatus } from "./types";
 import {
   albumSchema,
@@ -11,6 +12,7 @@ import {
   customCitySchema,
   fieldErrors,
   journalSchema,
+  photoLocationSchema,
   photoMetaSchema,
   placeSchema,
   stateNotesSchema,
@@ -297,6 +299,9 @@ export async function uploadPhoto(file: File, target: UploadTarget): Promise<Act
     height: img.height,
     dominantColor: img.dominantColor,
     takenOn: img.takenOn,
+    lat: img.gps?.lat ?? null,
+    lon: img.gps?.lon ?? null,
+    gpsChecked: true,
     caption: null,
     description: null,
     position: cityPositions.length ? Math.max(...cityPositions) + 1 : 0,
@@ -334,6 +339,72 @@ export async function updatePhoto(photoId: string, input: unknown): Promise<Acti
   return guard(async () => {
     await mutate({ put: [["photos", { ...cur, ...parsed.data }]] });
     return ok();
+  });
+}
+
+/**
+ * Set where a photo was taken, or pass null to remove it. A photo that isn't
+ * filed under a city yet goes to the nearest one.
+ */
+export async function setPhotoLocation(photoId: string, input: unknown): Promise<ActionResult<{ cityId: number | null; cityName: string | null; stateCode: string | null }>> {
+  const cur = R.photos.get(photoId);
+  if (!cur) return fail("Photo not found");
+  const parsed = photoLocationSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const loc = parsed.data;
+  const city = loc && !cur.cityId ? nearestCity(loc.lat, loc.lon) : null;
+  return guard(async () => {
+    await mutate({
+      put: [
+        [
+          "photos",
+          {
+            ...cur,
+            lat: loc ? Math.round(loc.lat * 1e6) / 1e6 : null,
+            lon: loc ? Math.round(loc.lon * 1e6) / 1e6 : null,
+            gpsChecked: true,
+            ...(city ? { cityId: city.id } : {}),
+          },
+        ],
+      ],
+    });
+    return ok({ cityId: city?.id ?? cur.cityId, cityName: city?.name ?? null, stateCode: city?.state ?? null });
+  });
+}
+
+/** Photos saved before locations were kept. */
+export function countPhotosToLocate() {
+  let n = 0;
+  for (const p of R.photos.values()) if (!p.gpsChecked) n++;
+  return n;
+}
+
+/**
+ * Read a batch of stored originals for their GPS position. Call repeatedly
+ * until `remaining` is 0.
+ */
+export async function locateOlderPhotos(): Promise<ActionResult<{ checked: number; found: number; remaining: number }>> {
+  const batch = [...R.photos.values()].filter((p) => !p.gpsChecked).slice(0, 15);
+  let found = 0;
+  const put: [StoreName, object][] = [];
+  for (const p of batch) {
+    let gps: { lat: number; lon: number } | null = null;
+    try {
+      const blob = await getBlob(p.id, "original");
+      if (blob) {
+        const g = await exifr.gps(blob).catch(() => null);
+        if (g && Number.isFinite(g.latitude) && Number.isFinite(g.longitude) && !(g.latitude === 0 && g.longitude === 0)) gps = { lat: g.latitude, lon: g.longitude };
+      }
+    } catch (err) {
+      console.error(`couldn't read the original of photo ${p.id}`, err);
+    }
+    const cityId = gps && !p.cityId ? (nearestCity(gps.lat, gps.lon)?.id ?? null) : p.cityId;
+    put.push(["photos", { ...p, gpsChecked: true, ...(gps ? { lat: gps.lat, lon: gps.lon, cityId } : {}) }]);
+    if (gps) found++;
+  }
+  return guard(async () => {
+    if (put.length) await mutate({ put });
+    return ok({ checked: batch.length, found, remaining: countPhotosToLocate() });
   });
 }
 

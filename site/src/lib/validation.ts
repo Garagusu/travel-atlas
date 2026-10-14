@@ -117,6 +117,14 @@ export const journalSchema = z.object({
   tags: tagList.default([]),
 });
 
+/** A photo's location; null removes it. */
+export const photoLocationSchema = z
+  .object({
+    lat: z.number().finite().min(-90).max(90),
+    lon: z.number().finite().min(-180).max(180),
+  })
+  .nullable();
+
 export const photoMetaSchema = z.object({
   caption: optionalText(200),
   description: optionalText(5000),

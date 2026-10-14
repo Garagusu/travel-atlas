@@ -1,4 +1,6 @@
+import { LocateOlderPhotos } from "@/components/photos/locate-older-photos";
 import { PhotoImg } from "@/components/photos/photo-img";
+import { countPhotosToLocate } from "@/lib/actions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Container, PageHeader } from "@/components/ui/page-header";
 import { Link, useTitle } from "@/lib/nav";
@@ -10,6 +12,7 @@ export function AlbumsPage() {
   const albums = useStore(listAlbums);
   const trips = useStore(() => listTripOptions().map((t) => ({ id: t.id, title: t.name })));
   const photoCount = useStore(() => R.photos.size);
+  const toLocate = useStore(countPhotosToLocate);
   return (
     <Container>
       <PageHeader
@@ -44,6 +47,8 @@ export function AlbumsPage() {
         </ul>
       )}
       <section className="mt-16" aria-labelledby="all-h">
+        {/* stays mounted after it finishes so its result stays on screen */}
+        <LocateOlderPhotos count={toLocate} />
         <h2 id="all-h" className="text-3xl mb-1">All photos</h2>
         <p className="text-sm text-ink-soft mb-5">Newest first. Add photos here that don&apos;t belong to a particular city, or select photos to file them into albums.</p>
         <Library albums={albums.map((a) => ({ id: a.id, title: a.title }))} trips={trips} />

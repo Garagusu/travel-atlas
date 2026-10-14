@@ -7,7 +7,9 @@ let sharedLink = "";
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ permissions: ["clipboard-read", "clipboard-write"] });
   await page.route("https://nominatim.openstreetmap.org/**", (route) =>
-    route.fulfill({
+    route.request().url().includes("/reverse")
+      ? route.fulfill({ json: { name: "", address: { neighbourhood: "Russian Hill", city: "San Francisco", state: "California" } } })
+      : route.fulfill({
       json: [
         {
           lat: "42.3634156",
@@ -260,6 +262,57 @@ test("the photo library filters by year and city together", async () => {
 
   await page.getByRole("button", { name: "Clear filters" }).click();
   await expect(tiles).toHaveCount(3);
+});
+
+test("a photo's location shows in the viewer, can be changed, and older photos get theirs", async () => {
+  await go("/cities/5391959");
+  await page.getByRole("button", { name: "Open photo" }).first().click();
+  const viewer = page.getByRole("dialog");
+  await expect(viewer.getByText("Russian Hill, San Francisco")).toBeVisible();
+  await expect(viewer.getByRole("link", { name: "Open in Maps" })).toHaveAttribute("href", /query=37\.\d+,-122\.\d+/);
+
+  await viewer.getByRole("button", { name: "Remove", exact: true }).click();
+  await viewer.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(viewer.getByText("No location saved for this photo")).toBeVisible();
+  await viewer.getByRole("button", { name: "Add location" }).click();
+  await viewer.locator("canvas.maplibregl-canvas").click();
+  await viewer.getByRole("button", { name: "Save location" }).click();
+  await expect(page.getByText("Location saved")).toBeVisible();
+  await expect(viewer.getByText(/37\.\d+° N, 122\.\d+° W/)).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // pretend the photo was saved before locations were kept
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("travel-atlas");
+        open.onsuccess = () => {
+          const tx = open.result.transaction("photos", "readwrite");
+          const store = tx.objectStore("photos");
+          store.getAll().onsuccess = (e) => {
+            for (const p of (e.target as IDBRequest).result) {
+              if (p.originalName !== "with-gps.jpg") continue;
+              delete p.lat;
+              delete p.lon;
+              delete p.gpsChecked;
+              store.put(p);
+            }
+          };
+          tx.oncomplete = () => {
+            open.result.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+  );
+  await page.reload();
+  await go("/albums");
+  await page.getByRole("button", { name: "Find their locations" }).click();
+  await expect(page.getByText(/1 of \d+ older photos? had a location/)).toBeVisible({ timeout: 20_000 });
+
+  await go("/");
+  await expect(page.getByRole("button", { name: "Photos" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("the site can be added to the home screen", async () => {

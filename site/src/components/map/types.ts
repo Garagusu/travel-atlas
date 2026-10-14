@@ -51,7 +51,10 @@ export type CityPick = {
   lat: number;
 };
 
-export type StatusFilter = { visited: boolean; want: boolean; none: boolean; places?: boolean };
+export type StatusFilter = { visited: boolean; want: boolean; none: boolean; places?: boolean; photos?: boolean };
+
+/** A photo with a location, as the big map draws it. */
+export type MapPhoto = { id: string; lat: number; lon: number; caption: string | null; takenOn: string | null; cityName?: string | null; stateCode?: string | null };
 
 export type MapPlace = {
   id: string;

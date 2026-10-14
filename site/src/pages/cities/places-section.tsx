@@ -33,7 +33,18 @@ const empty: Draft = { name: "", category: "restaurant", address: "", notes: "",
 
 type CityInfo = { id: number; name: string; lat: number; lon: number; stateCode: string; status: string };
 
-export function PlacesSection({ city, places, nearby }: { city: CityInfo; places: Place[]; nearby: { lon: number; lat: number; name: string }[] }) {
+export function PlacesSection({
+  city,
+  places,
+  nearby,
+  photoSpots = [],
+}: {
+  city: CityInfo;
+  places: Place[];
+  nearby: { lon: number; lat: number; name: string }[];
+  /** where this city's photos were taken */
+  photoSpots?: { id: string; lat: number; lon: number }[];
+}) {
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<Draft>(empty);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -48,8 +59,9 @@ export function PlacesSection({ city, places, nearby }: { city: CityInfo; places
     ];
     for (const p of places) if (p.lat !== null && p.lon !== null && p.id !== editing) m.push({ id: p.id, lon: p.lon, lat: p.lat, label: p.name, kind: "place" });
     if (editing && draft.lat !== null && draft.lon !== null) m.push({ id: "draft", lon: draft.lon, lat: draft.lat, label: draft.name || "New place", kind: "place" });
-    return m;
-  }, [city, places, editing, draft.lat, draft.lon, draft.name]);
+    // photo spots first so places and the city sit on top of them
+    return [...photoSpots.map((p) => ({ id: `ph-${p.id}`, lon: p.lon, lat: p.lat, label: "", kind: "photo" as const })), ...m];
+  }, [city, places, editing, draft.lat, draft.lon, draft.name, photoSpots]);
 
   const nearbyMemo = useMemo(() => nearby, [nearby]);
   const near = useMemo(() => ({ lat: city.lat, lon: city.lon, name: city.name }), [city.lat, city.lon, city.name]);
@@ -128,6 +140,11 @@ export function PlacesSection({ city, places, nearby }: { city: CityInfo; places
         onPick={editing ? (pt) => setDraft((d) => ({ ...d, lat: Math.round(pt.lat * 1e5) / 1e5, lon: Math.round(pt.lon * 1e5) / 1e5 })) : undefined}
         pickLabel="Or click the map to pin it"
       />
+      {photoSpots.length > 0 && (
+        <p className="mt-1.5 text-xs text-ink-soft flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-full bg-[#b4536a] ring-1 ring-white" aria-hidden /> Where {photoSpots.length === 1 ? "your photo was" : `your ${photoSpots.length} photos were`} taken
+        </p>
+      )}
 
       {editing && (
         <form
